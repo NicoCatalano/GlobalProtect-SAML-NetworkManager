@@ -7,12 +7,10 @@
 # has no usable DISPLAY/WAYLAND_DISPLAY/XDG_RUNTIME_DIR/DBUS_SESSION_BUS_ADDRESS
 # and silently fails to open a window (issue #7). This wrapper reconstructs the
 # session environment, works around NetworkManager's ProtectHome=read-only
-# sandbox, and closes the browser once the authentication is done.
+# sandbox, and optionally registers a dedicated SSO window with GNOME Shell.
 #
 # Which browser to launch comes from $GP_BROWSER (set by nm-gpclient-service);
-# without it we autodetect. $GP_AUTH_TIMEOUT overrides the 300 s safety timeout.
-
-MAX_WAIT="${GP_AUTH_TIMEOUT:-300}"
+# without it we autodetect. Browser lifetime is controlled only by GNOME Shell.
 
 # LOG_FILE is set after REAL_UID is known (security: per-user log file). Until
 # then log() must go to stderr, so an inherited LOG_FILE cannot receive messages
@@ -119,8 +117,8 @@ fi
 # Per-user log file (security: prevent symlink attack). The name is kept from
 # the old edge-only wrapper so existing troubleshooting docs stay valid.
 LOG_FILE="/tmp/edge-wrapper-$REAL_UID.log"
-log "called with args: $*"
-log "EUID=$EUID USER=${USER:-} SUDO_UID=${SUDO_UID:-} SUDO_USER=${SUDO_USER:-} PKEXEC_UID=${PKEXEC_UID:-} DOAS_USER=${DOAS_USER:-} GP_BROWSER=${GP_BROWSER:-unset} GP_AUTH_TIMEOUT=$MAX_WAIT"
+log "called for browser authentication"
+log "EUID=$EUID USER=${USER:-} SUDO_UID=${SUDO_UID:-} SUDO_USER=${SUDO_USER:-} PKEXEC_UID=${PKEXEC_UID:-} DOAS_USER=${DOAS_USER:-} GP_BROWSER=${GP_BROWSER:-unset}"
 log "resolved real user: $REAL_USER (uid=$REAL_UID) home=$REAL_HOME"
 
 # --- Pick the browser binary ------------------------------------------------
@@ -331,17 +329,14 @@ BROWSER_FLAGS=()
 case "$FAMILY" in
     edge|chromium)
         write_chromium_policy
+        PROFILE_FLAGS=()
         if [ "$HOME_IS_RO" -eq 1 ]; then
             PROFILE_DIR="$ALT_PROFILE_DIR"
             mkdir -p "$PROFILE_DIR/Crash Reports" "$EFFECTIVE_HOME/.config/Crash Reports" 2>/dev/null
-        else
-            # Reuse the user's real profile so existing SSO cookies apply
-            case "$(basename "$BROWSER_BIN")" in
-                microsoft-edge*) PROFILE_DIR="$REAL_HOME/.config/microsoft-edge" ;;
-                chromium*)       PROFILE_DIR="$REAL_HOME/.config/chromium" ;;
-                *)               PROFILE_DIR="$REAL_HOME/.config/google-chrome" ;;
-            esac
+            PROFILE_FLAGS=("--user-data-dir=$PROFILE_DIR")
         fi
+        # With a writable home let the browser select its normal profile,
+        # including its release channel and most recently selected profile.
         BROWSER_FLAGS=(
             "--no-first-run"
             "--no-default-browser-check"
@@ -355,7 +350,7 @@ case "$FAMILY" in
             "--disable-features=msEdgeSyncService,TranslateUI,EdgeCollections,msEdgeSweeperMode,ExternalProtocolDialog"
             "--app=$URL"
             "--window-size=896,964"
-            "--user-data-dir=$PROFILE_DIR"
+            "${PROFILE_FLAGS[@]}"
         )
         if [ "$SESSION_TYPE" = "wayland" ]; then
             BROWSER_FLAGS=("--ozone-platform=wayland" "--enable-features=UseOzonePlatform" "${BROWSER_FLAGS[@]}")
@@ -374,68 +369,27 @@ case "$FAMILY" in
         ;;
 esac
 
-# --- gpauth is the authoritative "authentication finished" signal -----------
-#
-# gpauth exits as soon as it receives the callback data, so its death means the
-# user is done. It cannot be found via $PPID: open::with_detached() double-forks
-# and calls setsid(), so this wrapper's parent is init, not gpauth.
-GPAUTH_PID=$(pgrep -n -x -u "$REAL_UID" gpauth 2>/dev/null | head -1)
-if [ -n "$GPAUTH_PID" ]; then
-    log "tracking gpauth PID $GPAUTH_PID"
-else
-    log "WARNING: no gpauth process found - the browser will not be closed automatically"
-fi
+log "launching authentication browser (URL omitted)"
 
-log "env: ${ENV_VARS[*]}"
-log "cmd: $BROWSER_BIN ${BROWSER_FLAGS[*]}"
+# Pass correlation explicitly through sudo, whose default environment is reset.
+ENV_VARS+=("GP_SSO_UUID=${GP_SSO_UUID:-}")
+ENV_VARS+=("GP_SSO_ACTIVE_PATH=${GP_SSO_ACTIVE_PATH:-}")
+ENV_VARS+=("GP_SSO_ATTEMPT=${GP_SSO_ATTEMPT:-}")
+ENV_VARS+=("GP_SSO_NM_OWNER=${GP_SSO_NM_OWNER:-}")
+SSO_HELPER=/usr/libexec/gpclient/sso-window-helper
 
-run_browser_with_monitor() {
+launch_browser() {
+    # Keep each browser's existing launch flags, including app mode and profile.
+    # Reused windows/tabs are rejected by the extension's pre-launch snapshot.
+    if [ "$HOME_IS_RO" -eq 0 ] && [ -x "$SSO_HELPER" ]; then
+        if env "${ENV_VARS[@]}" "$SSO_HELPER" "$BROWSER_BIN" "$URL" "${BROWSER_FLAGS[@]}" 2>>"$LOG_FILE"; then
+            return 0
+        fi
+        log "SSO window tracking unavailable; opening browser normally"
+    fi
     env "${ENV_VARS[@]}" "$BROWSER_BIN" "${BROWSER_FLAGS[@]}" 2>>"$LOG_FILE" &
     BROWSER_PID=$!
-    log "started browser with PID=$BROWSER_PID"
-
-    # Give the process a moment to fail loudly (bad flags, no display)
-    sleep 1
-
-    if [ -z "$GPAUTH_PID" ]; then
-        wait "$BROWSER_PID" 2>/dev/null
-        log "done: browser exited (no gpauth to watch, nothing was killed)"
-        return 0
-    fi
-
-    # Stay alive for as long as gpauth does: that is how long the
-    # authentication window can appear, so it is also how long the window rule
-    # has to stay loaded - even when the process we started handed the URL to an
-    # already running browser and exited straight away.
-    local elapsed=0 handed_over=0
-    while kill -0 "$GPAUTH_PID" 2>/dev/null; do
-        if [ "$handed_over" -eq 0 ] && ! kill -0 "$BROWSER_PID" 2>/dev/null; then
-            handed_over=1
-            log "the browser we started exited - the URL went to a running instance"
-        fi
-
-        if [ "$elapsed" -ge "$MAX_WAIT" ]; then
-            log "done: timeout after ${MAX_WAIT}s with gpauth still running"
-            if [ "$handed_over" -eq 0 ]; then
-                log "killing the browser we started"
-                kill -9 "$BROWSER_PID" 2>/dev/null
-                wait "$BROWSER_PID" 2>/dev/null
-            fi
-            return 1
-        fi
-
-        sleep 2
-        elapsed=$((elapsed + 2))
-    done
-
-    if [ "$handed_over" -eq 1 ]; then
-        log "done: gpauth ($GPAUTH_PID) exited - authentication finished (window belongs to a running browser, not closing it)"
-        return 0
-    fi
-
-    log "done: gpauth ($GPAUTH_PID) exited - authentication finished, closing browser"
-    sleep 2
-    kill "$BROWSER_PID" 2>/dev/null
+    log "started browser with PID=$BROWSER_PID; manual closing available"
     wait "$BROWSER_PID" 2>/dev/null
     return 0
 }
@@ -443,11 +397,11 @@ run_browser_with_monitor() {
 if [ "$EUID" -eq 0 ]; then
     # "#uid" makes sudo take a numeric UID, so the name is never involved
     log "running as root; dropping privileges to $REAL_USER (uid=$REAL_UID) via sudo"
-    exec sudo -u "#$REAL_UID" bash -c "$(declare -f log run_browser_with_monitor); \
+    exec sudo -u "#$REAL_UID" bash -c "$(declare -f log launch_browser); \
 ENV_VARS=(${ENV_VARS[*]@Q}); BROWSER_BIN=${BROWSER_BIN@Q}; \
 BROWSER_FLAGS=(${BROWSER_FLAGS[*]@Q}); LOG_FILE=${LOG_FILE@Q}; \
-GPAUTH_PID=${GPAUTH_PID@Q}; MAX_WAIT=${MAX_WAIT@Q}; run_browser_with_monitor"
+HOME_IS_RO=${HOME_IS_RO@Q}; SSO_HELPER=${SSO_HELPER@Q}; URL=${URL@Q}; launch_browser"
 else
     log "running as EUID=$EUID (no privilege drop needed)"
-    run_browser_with_monitor
+    launch_browser
 fi

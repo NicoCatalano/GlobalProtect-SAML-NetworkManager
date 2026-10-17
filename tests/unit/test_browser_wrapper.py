@@ -141,8 +141,6 @@ def _root_env(tmp_path, **extra):
     env = {
         "PATH": f"{tmp_path}:{os.environ['PATH']}",
         "GP_BROWSER": str(tmp_path / "browser"),
-        # Never wait long for a gpauth that may exist on the machine
-        "GP_AUTH_TIMEOUT": "5",
     }
     env.update(extra)
     return env
@@ -683,7 +681,7 @@ def test_missing_logger_is_not_an_error(tmp_path):
 @pytest.mark.skipif(IS_ROOT, reason="as root the wrapper runs sudo")
 def test_session_processes_are_looked_up_once_per_name(tmp_path):
     """session_env_var is called for many variables: pgrep must not run again
-    for each of them (one lookup per session process name, plus gpauth)."""
+    for each of them (one lookup per session process name)."""
     _script(tmp_path / "id", f"echo {FAKE_UID}\n")
     _fake_browser(tmp_path)
     # Prints nothing, so no /proc/<pid>/environ is read either
@@ -704,7 +702,6 @@ def test_session_processes_are_looked_up_once_per_name(tmp_path):
         "cinnamon-session",
         "mate-session",
         "sway",
-        "gpauth",
     }
 
 
@@ -738,3 +735,62 @@ def test_non_root_without_home_sets_no_xauthority(tmp_path):
 
     _assert_browser_started(tmp_path, result)
     assert "XAUTHORITY" not in _browser_env(tmp_path)
+
+
+def test_browser_is_never_killed_when_gpauth_exits(tmp_path):
+    """Authentication completion, failure and timeout cannot close a browser."""
+    _fake_root_tools(tmp_path)
+    _script(tmp_path / "id", f"echo {FAKE_UID}\n")
+    _script(tmp_path / "pgrep", 'if [ "${!#}" = gpauth ]; then echo 987654; fi\n')
+    shell_init = tmp_path / "shell-init"
+    shell_init.write_text(
+        'kill() {\n'
+        f'    echo "$*" >> {tmp_path}/kill_calls\n'
+        '    return 1\n'
+        '}\n'
+    )
+    result = _run_wrapper(_root_env(tmp_path, SUDO_UID=str(FAKE_UID),
+                                    BASH_ENV=str(shell_init)))
+    _assert_browser_started(tmp_path, result)
+    assert not (tmp_path / "kill_calls").exists()
+
+
+@pytest.mark.parametrize("browser, app_mode", [
+    ("firefox", False), ("google-chrome-beta", True),
+    ("chromium", True), ("microsoft-edge", True), ("custom-browser", False),
+])
+@pytest.mark.parametrize("helper_status", [0, 1], ids=["tracked", "fallback"])
+def test_sso_bridge_preserves_browser_launch(tmp_path, monkeypatch, browser, app_mode, helper_status):
+    """The bridge receives the real launch flags; failure uses the original URL."""
+    _fake_root_tools(tmp_path)
+    (tmp_path / "home").mkdir()
+    shutil.copyfile(tmp_path / "browser", tmp_path / browser)
+    (tmp_path / browser).chmod(0o755)
+    _script(tmp_path / "id", f"echo {FAKE_UID}\n")
+    _script(tmp_path / "pgrep", "exit 1\n")
+    helper = tmp_path / "fake-helper"
+    _script(helper,
+            f'printf "%s\\0" "$@" > {shlex.quote(str(tmp_path / "helper_args"))}\n'
+            f'exit {helper_status}\n')
+    wrapper = tmp_path / "browser-wrapper.sh"
+    with open(WRAPPER) as source:
+        wrapper.write_text(source.read().replace(
+            "SSO_HELPER=/usr/libexec/gpclient/sso-window-helper",
+            "SSO_HELPER=" + shlex.quote(str(helper))))
+    monkeypatch.setitem(globals(), "WRAPPER", str(wrapper))
+    result = _run_wrapper(_root_env(tmp_path, SUDO_UID=str(FAKE_UID),
+                                    GP_BROWSER=str(tmp_path / browser)))
+    assert result.returncode == 0, result.stderr
+    args = (tmp_path / "helper_args").read_bytes().decode().rstrip("\0").split("\0")
+    assert args[:2] == [str(tmp_path / browser), URL]
+    flags = args[2:]
+    if app_mode:
+        assert "--app=" + URL in flags
+        assert not any(flag.startswith("--user-data-dir=") for flag in flags)
+    elif browser == "firefox":
+        assert flags == ["--new-window", URL]
+    else:
+        assert flags == [URL]
+    assert (tmp_path / "opened").exists() == (helper_status != 0)
+    if helper_status:
+        assert (tmp_path / "opened").read_text().strip() == " ".join(flags)

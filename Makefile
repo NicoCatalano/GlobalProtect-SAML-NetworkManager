@@ -52,6 +52,7 @@ install: all
 	install -D -m 755 service/nm-gpclient-service.py /usr/lib/NetworkManager/nm-gpclient-service
 	# Install scripts
 	install -D -m 755 scripts/nm-gpclient-systemd-activate /usr/lib/NetworkManager/nm-gpclient-systemd-activate
+	install -D -m 755 scripts/sso-window-helper.py /usr/libexec/gpclient/sso-window-helper
 	install -D -m 755 scripts/browser-wrapper.sh /usr/libexec/gpclient/browser-wrapper
 	install -D -m 755 scripts/edge-wrapper.sh /usr/libexec/gpclient/edge-wrapper
 	# Install auth dialog (interactive credentials/RSA token prompts)
@@ -126,6 +127,7 @@ install-dev: gnome-plugins
 
 	# Install helper scripts
 	sudo install -m 755 scripts/nm-gpclient-systemd-activate $(NM_LIB_DIR)/nm-gpclient-systemd-activate
+	sudo install -m 755 scripts/sso-window-helper.py $(NM_LIBEXEC_DIR)/sso-window-helper
 	sudo install -m 755 scripts/browser-wrapper.sh $(NM_LIBEXEC_DIR)/browser-wrapper
 	sudo install -m 755 scripts/edge-wrapper.sh $(NM_LIBEXEC_DIR)/edge-wrapper
 
@@ -228,3 +230,12 @@ logs: $(ARTIFACTS_DIR)
 # Clean test artifacts
 clean-artifacts:
 	rm -rf $(ARTIFACTS_DIR)/*
+
+# Optional companion; installation does not enable it or change its settings.
+SSO_EXTENSION = gpclient-sso@globalprotect-saml-networkmanager
+.PHONY: install-sso-extension
+install-sso-extension:
+	install -d "$(DESTDIR)/usr/share/gnome-shell/extensions/$(SSO_EXTENSION)/schemas"
+	install -m 644 extensions/$(SSO_EXTENSION)/*.js extensions/$(SSO_EXTENSION)/metadata.json "$(DESTDIR)/usr/share/gnome-shell/extensions/$(SSO_EXTENSION)/"
+	install -m 644 extensions/$(SSO_EXTENSION)/schemas/*.xml "$(DESTDIR)/usr/share/gnome-shell/extensions/$(SSO_EXTENSION)/schemas/"
+	glib-compile-schemas "$(DESTDIR)/usr/share/gnome-shell/extensions/$(SSO_EXTENSION)/schemas"

@@ -84,3 +84,19 @@ jobs:
           path: junit.xml
           if-no-files-found: ignore
           retention-days: 14
+
+  sso-tracker:
+    name: SSO window safety (GJS)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install GJS
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes gjs libglib2.0-bin
+      - name: Test window tracking and extension lifecycle without a desktop
+        run: |
+          gjs -m tests/unit/sso_tracker.mjs
+          gjs -m tests/unit/sso_extension.mjs
+          make DESTDIR="$RUNNER_TEMP/sso-stage" install-sso-extension

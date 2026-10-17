@@ -1,0 +1,16 @@
+{
+  "uuid": "gpclient-sso@globalprotect-saml-networkmanager",
+  "name": "GlobalProtect SSO Window",
+  "description": "Track dedicated VPN login windows on Wayland. Dry run by default.",
+  "shell-version": [
+    "45",
+    "46",
+    "47",
+    "48",
+    "49",
+    "50",
+    "51"
+  ],
+  "settings-schema": "org.gnome.shell.extensions.gpclient-sso",
+  "version": 1
+}
