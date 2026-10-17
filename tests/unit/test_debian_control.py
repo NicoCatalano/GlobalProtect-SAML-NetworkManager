@@ -1113,20 +1113,25 @@ class TestChangelog:
         text = read("changelog")
         return text[:text.index("\n -- ")]
 
+    def release_1_5_0(self):
+        text = read("changelog")
+        start = text.index("network-manager-gpclient (1.5.0-1) ")
+        return text[start:text.index("\n -- ", start)]
+
     def test_the_plasma_package_and_its_qt_are_described(self):
-        top = self.top()
+        top = self.release_1_5_0()
         assert "network-manager-gpclient-plasma," in top
         assert "Qt5 on Ubuntu 22.04 and 24.04" in top and "Qt6" in top
 
     def test_the_former_test_packages_are_removed_not_replaced(self):
-        top = " ".join(self.top().split())
+        top = " ".join(self.release_1_5_0().split())
         assert "network-manager-gpclient-plasma-5 and -plasma-6, were never released" in top
         assert "Breaks them, so apt full-upgrade removes them" in top
         assert "apt install network-manager-gpclient-plasma installs the editor" in top
         assert "are replaced by it" not in top
 
     def test_the_plasma_6_package_for_kde_neon_is_announced_once(self):
-        top = " ".join(self.top().split())
+        top = " ".join(self.release_1_5_0().split())
         assert top.count("New network-manager-gpclient-plasma-6 for KDE neon (Ubuntu 24.04 with Plasma 6") == 1
         assert "built against the neon repository for amd64 only" in top
         assert "conflicts with the Qt5 network-manager-gpclient-plasma of Ubuntu 24.04" in top

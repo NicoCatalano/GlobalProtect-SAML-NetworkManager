@@ -15,7 +15,7 @@ A NetworkManager VPN plugin for GlobalProtect with GUI configuration support for
 
 ### From Release (Recommended)
 
-Download packages from [GitHub Releases](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/releases) for your Ubuntu version.
+Download packages from [GitHub Releases](https://github.com/NicoCatalano/GlobalProtect-SAML-NetworkManager/releases) for your Ubuntu version.
 
 Install two packages:
 1. **network-manager-gpclient** - core package (required)

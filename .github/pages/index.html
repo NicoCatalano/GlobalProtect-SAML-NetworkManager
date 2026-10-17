@@ -37,11 +37,11 @@
 
 <h2>Install</h2>
 
-<pre><code>curl -fsSL https://wmp.github.io/GlobalProtect-SAML-NetworkManager/gpclient-archive-keyring.gpg \
+<pre><code>curl -fsSL https://nicocatalano.github.io/GlobalProtect-SAML-NetworkManager/gpclient-archive-keyring.gpg \
   | sudo tee /usr/share/keyrings/gpclient-archive-keyring.gpg &gt; /dev/null
 
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gpclient-archive-keyring.gpg] \
-https://wmp.github.io/GlobalProtect-SAML-NetworkManager $(lsb_release -cs) main" \
+https://nicocatalano.github.io/GlobalProtect-SAML-NetworkManager $(lsb_release -cs) main" \
   | sudo tee /etc/apt/sources.list.d/gpclient.list
 
 sudo apt update
@@ -77,8 +77,8 @@ sudo apt update</code></pre>
 <p>The key is used for signing this repository only.</p>
 
 <footer>
-  <a href="https://github.com/WMP/GlobalProtect-SAML-NetworkManager">Source, issues and documentation on GitHub</a>
-  &middot; <a href="https://github.com/WMP/GlobalProtect-SAML-NetworkManager/blob/main/docs/APT_REPO.md">how this repository works</a>
+  <a href="https://github.com/NicoCatalano/GlobalProtect-SAML-NetworkManager">Source, issues and documentation on GitHub</a>
+  &middot; <a href="https://github.com/NicoCatalano/GlobalProtect-SAML-NetworkManager/blob/main/docs/APT_REPO.md">how this repository works</a>
   &middot; rebuilt __UPDATED__
 </footer>
 

@@ -89,6 +89,9 @@ ifneq ($(HAS_CORE),)
 	# Install auth dialog (interactive credentials/RSA token prompts, GTK)
 	install -D -m 755 auth-dialog/nm-gpclient-auth-dialog.py \
 		$(CURDIR)/debian/network-manager-gpclient-gnome/usr/libexec/nm-gpclient-auth-dialog
+
+	# Ship the optional GNOME Wayland SSO window extension with the GNOME package.
+	$(MAKE) DESTDIR=$(CURDIR)/debian/network-manager-gpclient-gnome install-sso-extension
 endif
 
 	# Install Plasma plugin (into network-manager-gpclient-plasma, or into

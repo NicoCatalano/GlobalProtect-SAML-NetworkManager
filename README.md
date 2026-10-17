@@ -30,10 +30,10 @@ Add the apt repository and install - dependencies, upgrades and the GNOME/Plasma
 choice are handled by apt:
 
 ```bash
-curl -fsSL https://wmp.github.io/GlobalProtect-SAML-NetworkManager/gpclient-archive-keyring.gpg \
+curl -fsSL https://nicocatalano.github.io/GlobalProtect-SAML-NetworkManager/gpclient-archive-keyring.gpg \
   | sudo tee /usr/share/keyrings/gpclient-archive-keyring.gpg > /dev/null
 
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gpclient-archive-keyring.gpg] https://wmp.github.io/GlobalProtect-SAML-NetworkManager $(lsb_release -cs) main" \
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gpclient-archive-keyring.gpg] https://nicocatalano.github.io/GlobalProtect-SAML-NetworkManager $(lsb_release -cs) main" \
   | sudo tee /etc/apt/sources.list.d/gpclient.list
 
 sudo apt update
@@ -49,6 +49,15 @@ sudo apt install network-manager-gpclient-plasma-6 # KDE neon (Ubuntu 24.04 with
 Supported: Ubuntu 22.04, 24.04, 24.10 and 26.04, `amd64` and `arm64`. Details, deb822 format and
 removal instructions: [docs/APT_REPO.md](docs/APT_REPO.md).
 
+On GNOME 45–51 with Wayland, the GNOME package also includes an optional SSO
+window extension. Log out and back in after installing, then enable it with
+`gnome-extensions enable gpclient-sso@globalprotect-saml-networkmanager`.
+It starts with window closing disabled. After confirming that the user journal
+reports `would close tracked login window` for a successful connection, enable
+closing with `gsettings --schemadir /usr/share/gnome-shell/extensions/gpclient-sso@globalprotect-saml-networkmanager/schemas set org.gnome.shell.extensions.gpclient-sso close-windows true`.
+Ubuntu 22.04's standard GNOME desktop is too old for this extension; the VPN
+plugin still works there.
+
 **Ubuntu 22.04 only:** `python3-sdbus` is not in apt, install it with pip first:
 ```bash
 pip3 install sdbus
@@ -58,7 +67,7 @@ pip3 install sdbus
 <summary>Alternative: individual .deb files</summary>
 
 Download the packages for your Ubuntu version from
-[GitHub Releases](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/releases)
+[GitHub Releases](https://github.com/NicoCatalano/GlobalProtect-SAML-NetworkManager/releases)
 (newer releases list their files in a table by Ubuntu version and architecture; older ones do not).
 You need **network-manager-gpclient** plus either
 **network-manager-gpclient-gnome**, **network-manager-gpclient-plasma** (or
