@@ -8,6 +8,12 @@ NetworkManager VPN plugin for GlobalProtect (Palo Alto Networks) with SAML/SSO a
 
 <img width="451" height="600" alt="image" src="https://github.com/user-attachments/assets/29c54314-33f3-4b07-9378-a8e4c462409c" />
 
+## Local Arch build and deployment
+
+Use [the Arch build and deployment guide](docs/gnome-sso-window.md) for the local
+GNOME SSO companion. `./scripts/build-arch.sh` builds and verifies one package
+under `build/arch/packages/`; installing a package does not enable the extension.
+
 ## Features
 
 - **NetworkManager integration** - manage VPN like any other connection

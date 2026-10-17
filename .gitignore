@@ -77,3 +77,12 @@ artifacts/
 
 # Claude Code
 .claude/
+
+# Local Arch build outputs and makepkg's bare Git source cache
+/src/
+/pkg/
+/GlobalProtect-SAML-NetworkManager/
+/*.pkg.tar.*
+
+# Separate AUR dependency checkout, not source for this project
+/python-sdbus/
