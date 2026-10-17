@@ -1,7 +1,7 @@
 [VPN Connection]
 name=GlobalProtect
 service=org.freedesktop.NetworkManager.gpclient
-program=/usr/lib/NetworkManager/nm-gpclient-service
+program=/usr/lib/NetworkManager/nm-gpclient-systemd-activate
 
 [libnm]
 plugin=libnm-vpn-plugin-gpclient.so
