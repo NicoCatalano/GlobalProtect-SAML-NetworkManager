@@ -6,9 +6,12 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>460</width>
-    <height>300</height>
+    <width>700</width>
+    <height>540</height>
    </rect>
+  </property>
+  <property name="minimumSize">
+   <size><width>660</width><height>420</height></size>
   </property>
   <property name="windowTitle">
    <string>GlobalProtect VPN</string>
@@ -172,6 +175,16 @@ Automatic: retry once with the workaround when the portal asks for it, and switc
      </property>
      <property name="checked">
       <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item row="9" column="1">
+    <widget class="QCheckBox" name="closeBrowserCheckBox">
+     <property name="text">
+      <string>Close login window after VPN connects</string>
+     </property>
+     <property name="toolTip">
+      <string>Close only the dedicated login window after the VPN connects. Requires the KWin SSO adapter or GNOME companion.</string>
      </property>
     </widget>
    </item>

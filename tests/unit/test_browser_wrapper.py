@@ -108,21 +108,6 @@ def _fake_root_tools(tmp_path, reset_env=False):
     )
 
 
-def _fake_id_by_name(tmp_path, known_user=FAKE_SUDO_USER, known_output=FAKE_UID):
-    """Fake id: `id -u -- <known_user>` prints known_output, `id -u` prints 0,
-    anything else fails."""
-    _script(
-        tmp_path / "id",
-        f'if [ "$*" = "-u -- {known_user}" ]; then\n'
-        f"    printf '%s\\n' {shlex.quote(str(known_output))}\n"
-        'elif [ "$*" = "-u" ]; then\n'
-        "    echo 0\n"
-        "else\n"
-        "    exit 1\n"
-        "fi\n",
-    )
-
-
 def _fake_getent(tmp_path, entry_uid, home, name="entry.user"):
     """Fake getent: every uid lookup returns an entry with the given uid field."""
     _script(
@@ -141,8 +126,6 @@ def _root_env(tmp_path, **extra):
     env = {
         "PATH": f"{tmp_path}:{os.environ['PATH']}",
         "GP_BROWSER": str(tmp_path / "browser"),
-        # Never wait long for a gpauth that may exist on the machine
-        "GP_AUTH_TIMEOUT": "5",
     }
     env.update(extra)
     return env
@@ -277,7 +260,7 @@ def test_non_root_trusts_passwd_entry_only_for_the_same_uid(
     assert _browser_env(tmp_path)["HOME"] == str(expected)
 
 
-# --- Root: the desktop user comes from SUDO_UID, PKEXEC_UID or a name ---------
+# --- Root: the desktop user comes from SUDO_UID or PKEXEC_UID -----------------
 
 
 @pytest.mark.skipif(not IS_ROOT, reason="needs root to take the privilege-drop path")
@@ -304,8 +287,9 @@ REFUSED_AS_ROOT = "refusing to run the browser as root"
         {"SUDO_UID": "000"},
         # A set SUDO_UID wins even when it says root; PKEXEC_UID is not consulted
         {"SUDO_UID": "0", "PKEXEC_UID": str(FAKE_UID)},
-        {"USER": "root"},
-        {"SUDO_USER": "root"},
+        {"USER": FAKE_SUDO_USER},
+        {"SUDO_USER": FAKE_SUDO_USER},
+        {"DOAS_USER": FAKE_SUDO_USER},
         {},
     ],
     ids=[
@@ -313,16 +297,15 @@ REFUSED_AS_ROOT = "refusing to run the browser as root"
         "pkexec-uid-is-root",
         "sudo-uid-zeros",
         "sudo-uid-root-beats-pkexec-uid",
-        "user-root",
-        "sudo-user-root",
+        "user-is-ignored",
+        "sudo-user-is-ignored",
+        "doas-user-is-ignored",
         "no-variables",
     ],
 )
 def test_root_never_runs_browser_as_root(tmp_path, env):
     """Nothing points to a non-root user: refuse, do not run the browser as root."""
     _fake_root_tools(tmp_path)
-    _fake_id_by_name(tmp_path, known_user="root", known_output=0)
-
     result = _run_wrapper(_root_env(tmp_path, **env))
 
     _assert_rejected(tmp_path, result, REFUSED_AS_ROOT)
@@ -358,51 +341,6 @@ def test_root_rejects_passwd_entry_for_another_uid(tmp_path):
     result = _run_wrapper(_root_env(tmp_path, SUDO_UID=str(FAKE_UID)))
 
     _assert_rejected(tmp_path, result, f"passwd entry for uid {FAKE_UID} is for uid")
-
-
-@pytest.mark.skipif(not IS_ROOT, reason="needs root to take the SUDO_USER path")
-def test_root_falls_back_to_sudo_user(tmp_path):
-    _fake_root_tools(tmp_path)
-    _fake_id_by_name(tmp_path)
-
-    result = _run_wrapper(_root_env(tmp_path, SUDO_USER=FAKE_SUDO_USER))
-
-    _assert_browser_started(tmp_path, result)
-    assert _sudo_args(tmp_path)[:2] == ["-u", f"#{FAKE_UID}"]
-
-
-@pytest.mark.skipif(not IS_ROOT, reason="needs root to take the SUDO_USER path")
-@pytest.mark.parametrize(
-    "sudo_user",
-    ["unknown.user", "x; touch {pwned}"],
-    ids=["unknown-user", "shell-injection"],
-)
-def test_root_rejects_unknown_sudo_user(tmp_path, sudo_user):
-    _fake_root_tools(tmp_path)
-    _fake_id_by_name(tmp_path)  # fails for every name except the known one
-
-    result = _run_wrapper(
-        _root_env(tmp_path, SUDO_USER=sudo_user.format(pwned=tmp_path / "pwned"))
-    )
-
-    _assert_rejected(tmp_path, result, "Cannot get UID for user")
-
-
-@pytest.mark.skipif(not IS_ROOT, reason="needs root to take the SUDO_USER path")
-@pytest.mark.parametrize(
-    "id_output",
-    ["abc", "-1", "48213; touch {pwned}"],
-    ids=["letters", "negative", "shell-injection"],
-)
-def test_root_rejects_bad_id_output_for_sudo_user(tmp_path, id_output):
-    _fake_root_tools(tmp_path)
-    _fake_id_by_name(
-        tmp_path, known_output=id_output.format(pwned=tmp_path / "pwned")
-    )
-
-    result = _run_wrapper(_root_env(tmp_path, SUDO_USER=FAKE_SUDO_USER))
-
-    _assert_rejected(tmp_path, result, "cannot determine the real user's UID")
 
 
 @pytest.mark.skipif(not IS_ROOT, reason="needs root to take the SUDO_UID path")
@@ -468,18 +406,6 @@ def test_root_rejects_out_of_range_sudo_uid(tmp_path, sudo_uid):
     _assert_rejected(tmp_path, result, "cannot determine the real user's UID")
 
 
-@pytest.mark.skipif(not IS_ROOT, reason="needs root to take the USER path")
-def test_root_falls_back_to_user_without_sudo_variables(tmp_path):
-    """The old wrapper dropped to $USER when no SUDO_* was set."""
-    _fake_root_tools(tmp_path)
-    _fake_id_by_name(tmp_path)
-
-    result = _run_wrapper(_root_env(tmp_path, USER=FAKE_SUDO_USER))
-
-    _assert_browser_started(tmp_path, result)
-    assert _sudo_args(tmp_path)[:2] == ["-u", f"#{FAKE_UID}"]
-
-
 @pytest.mark.skipif(not IS_ROOT, reason="needs root to take the PKEXEC_UID path")
 def test_root_uses_pkexec_uid(tmp_path):
     _fake_root_tools(tmp_path)
@@ -498,84 +424,14 @@ def test_root_uses_pkexec_uid(tmp_path):
         ({"PKEXEC_UID": ""}, "cannot determine the real user's UID from PKEXEC_UID"),
         # A set but invalid variable is an error, never a reason to try the next
         ({"SUDO_UID": "abc", "PKEXEC_UID": str(FAKE_UID)}, "cannot determine the real user's UID from SUDO_UID"),
-        (
-            {"PKEXEC_UID": "abc", "DOAS_USER": FAKE_SUDO_USER},
-            "cannot determine the real user's UID from PKEXEC_UID",
-        ),
     ],
-    ids=["letters", "set-but-empty", "bad-sudo-uid-no-fallthrough", "bad-pkexec-uid-no-fallthrough"],
+    ids=["letters", "set-but-empty", "bad-sudo-uid-no-fallthrough"],
 )
 def test_root_rejects_invalid_uid_variable(tmp_path, env, reason):
     _fake_root_tools(tmp_path)
-    _fake_id_by_name(tmp_path)
-
     result = _run_wrapper(_root_env(tmp_path, **env))
 
     _assert_rejected(tmp_path, result, reason)
-
-
-@pytest.mark.skipif(not IS_ROOT, reason="needs root to take the DOAS_USER path")
-def test_root_uses_doas_user_by_id_lookup(tmp_path):
-    """The name is never parsed: only `id -u -- <name>` turns it into a number."""
-    _fake_root_tools(tmp_path)
-    _fake_id_by_name(tmp_path)
-
-    result = _run_wrapper(_root_env(tmp_path, DOAS_USER=FAKE_SUDO_USER))
-
-    _assert_browser_started(tmp_path, result)
-    assert _sudo_args(tmp_path)[:2] == ["-u", f"#{FAKE_UID}"]
-
-
-@pytest.mark.skipif(not IS_ROOT, reason="needs root to take the DOAS_USER path")
-def test_root_rejects_unknown_doas_user(tmp_path):
-    _fake_root_tools(tmp_path)
-    _fake_id_by_name(tmp_path)
-
-    result = _run_wrapper(_root_env(tmp_path, DOAS_USER="unknown.user"))
-
-    _assert_rejected(tmp_path, result, "Cannot get UID for user")
-
-
-@pytest.mark.skipif(not IS_ROOT, reason="needs root to take the lookup order path")
-def test_root_lookup_order_uid_before_names_and_doas_before_sudo_user(tmp_path):
-    """SUDO_UID, PKEXEC_UID, DOAS_USER, SUDO_USER, USER: the first one that is
-    set decides (names the fake id does not know would fail if they were tried)."""
-    _fake_root_tools(tmp_path)
-    _fake_id_by_name(tmp_path)
-
-    # A uid variable wins over every name
-    result = _run_wrapper(
-        _root_env(
-            tmp_path,
-            PKEXEC_UID=str(FAKE_UID),
-            DOAS_USER="unknown.user",
-            SUDO_USER="unknown.user",
-        )
-    )
-    _assert_browser_started(tmp_path, result)
-    assert _sudo_args(tmp_path)[:2] == ["-u", f"#{FAKE_UID}"]
-    (tmp_path / "opened").unlink()
-    (tmp_path / "sudo_args").unlink()
-
-    # DOAS_USER wins over SUDO_USER and USER
-    result = _run_wrapper(
-        _root_env(
-            tmp_path,
-            DOAS_USER=FAKE_SUDO_USER,
-            SUDO_USER="unknown.user",
-            USER="unknown.user",
-        )
-    )
-    _assert_browser_started(tmp_path, result)
-    assert _sudo_args(tmp_path)[:2] == ["-u", f"#{FAKE_UID}"]
-    (tmp_path / "opened").unlink()
-    (tmp_path / "sudo_args").unlink()
-
-    # ... and not the other way round: the unknown DOAS_USER decides and fails
-    result = _run_wrapper(
-        _root_env(tmp_path, DOAS_USER="unknown.user", SUDO_USER=FAKE_SUDO_USER)
-    )
-    _assert_rejected(tmp_path, result, "Cannot get UID for user")
 
 
 @pytest.mark.skipif(not IS_ROOT, reason="needs root to take the privilege-drop path")
@@ -600,21 +456,6 @@ def test_root_ignores_inherited_log_file(tmp_path, sudo_uid, message):
         _assert_browser_started(tmp_path, result)
     else:
         _assert_rejected(tmp_path, result, message)
-
-
-@pytest.mark.skipif(not IS_ROOT, reason="needs root to take the USER path")
-@pytest.mark.parametrize(
-    "user",
-    ["unknown.user", "x; touch {pwned}"],
-    ids=["unknown-user", "shell-injection"],
-)
-def test_root_rejects_unknown_user(tmp_path, user):
-    _fake_root_tools(tmp_path)
-    _fake_id_by_name(tmp_path)  # fails for every name except the known one
-
-    result = _run_wrapper(_root_env(tmp_path, USER=user.format(pwned=tmp_path / "pwned")))
-
-    _assert_rejected(tmp_path, result, "Cannot get UID for user")
 
 
 @pytest.mark.skipif(not IS_ROOT, reason="needs root to take the privilege-drop path")
@@ -683,7 +524,7 @@ def test_missing_logger_is_not_an_error(tmp_path):
 @pytest.mark.skipif(IS_ROOT, reason="as root the wrapper runs sudo")
 def test_session_processes_are_looked_up_once_per_name(tmp_path):
     """session_env_var is called for many variables: pgrep must not run again
-    for each of them (one lookup per session process name, plus gpauth)."""
+    for each of them (one lookup per session process name)."""
     _script(tmp_path / "id", f"echo {FAKE_UID}\n")
     _fake_browser(tmp_path)
     # Prints nothing, so no /proc/<pid>/environ is read either
@@ -704,7 +545,6 @@ def test_session_processes_are_looked_up_once_per_name(tmp_path):
         "cinnamon-session",
         "mate-session",
         "sway",
-        "gpauth",
     }
 
 
@@ -738,3 +578,137 @@ def test_non_root_without_home_sets_no_xauthority(tmp_path):
 
     _assert_browser_started(tmp_path, result)
     assert "XAUTHORITY" not in _browser_env(tmp_path)
+
+
+def test_browser_is_never_killed_when_gpauth_exits(tmp_path):
+    """Authentication completion, failure and timeout cannot close a browser."""
+    _fake_root_tools(tmp_path)
+    _script(tmp_path / "id", f"echo {FAKE_UID}\n")
+    _script(tmp_path / "pgrep", 'if [ "${!#}" = gpauth ]; then echo 987654; fi\n')
+    shell_init = tmp_path / "shell-init"
+    shell_init.write_text(
+        'kill() {\n'
+        f'    echo "$*" >> {tmp_path}/kill_calls\n'
+        '    return 1\n'
+        '}\n'
+    )
+    result = _run_wrapper(_root_env(tmp_path, SUDO_UID=str(FAKE_UID),
+                                    BASH_ENV=str(shell_init)))
+    _assert_browser_started(tmp_path, result)
+    assert not (tmp_path / "kill_calls").exists()
+
+
+@pytest.mark.parametrize("browser, app_mode", [
+    ("firefox", False), ("google-chrome-beta", True),
+    ("chromium", True), ("microsoft-edge", True), ("custom-browser", False),
+])
+@pytest.mark.parametrize("helper_status", [0, 1], ids=["tracked", "fallback"])
+def test_sso_bridge_preserves_browser_launch(tmp_path, monkeypatch, browser, app_mode, helper_status):
+    """The bridge receives the real launch flags; failure uses the original URL."""
+    _fake_root_tools(tmp_path)
+    (tmp_path / "home").mkdir()
+    shutil.copyfile(tmp_path / "browser", tmp_path / browser)
+    (tmp_path / browser).chmod(0o755)
+    _script(tmp_path / "id", f"echo {FAKE_UID}\n")
+    _script(tmp_path / "pgrep", "exit 1\n")
+    helper = tmp_path / "fake-helper"
+    _script(helper,
+            f'printf "%s\\0" "$@" > {shlex.quote(str(tmp_path / "helper_args"))}\n'
+            f'exit {helper_status}\n')
+    wrapper = tmp_path / "browser-wrapper.sh"
+    with open(WRAPPER) as source:
+        wrapper.write_text(source.read().replace(
+            "SSO_HELPER=/usr/libexec/gpclient/sso-window-helper",
+            "SSO_HELPER=" + shlex.quote(str(helper))))
+    monkeypatch.setitem(globals(), "WRAPPER", str(wrapper))
+    result = _run_wrapper(_root_env(tmp_path, SUDO_UID=str(FAKE_UID),
+                                    GP_BROWSER=str(tmp_path / browser)))
+    assert result.returncode == 0, result.stderr
+    args = (tmp_path / "helper_args").read_bytes().decode().rstrip("\0").split("\0")
+    assert args[:2] == [str(tmp_path / browser), URL]
+    flags = args[2:]
+    if app_mode:
+        assert "--app=" + URL in flags
+        assert not any(flag.startswith("--user-data-dir=") for flag in flags)
+    elif browser == "firefox":
+        assert flags == ["--new-window", URL]
+    else:
+        assert flags == [URL]
+    assert (tmp_path / "opened").exists() == (helper_status != 0)
+    if helper_status:
+        assert (tmp_path / "opened").read_text().strip() == " ".join(flags)
+
+
+@pytest.mark.parametrize("selection", ["default", "xdg-open"])
+@pytest.mark.parametrize("command, expected", [
+    ("firefox %u", "firefox"),
+    ("chromium %U", "chromium"),
+    ("firefox --profile private %u", None),
+    ("env firefox %u", None),
+    ("custom-browser %u", None),
+    ("missing-firefox %u", None),
+    ("/no/such/firefox %u", None),
+    ('firefox "', None),
+    ("firefox %u; touch pwned", None),
+    (None, None),
+])
+def test_default_browser_dedicated_window(tmp_path, monkeypatch, command, expected, selection):
+    """Known plain desktop launchers get window flags; custom launchers stay intact."""
+    import sys
+    from pathlib import Path
+
+    _fake_root_tools(tmp_path)
+    (tmp_path / "home").mkdir()
+    _script(tmp_path / "id", f"echo {FAKE_UID}\n")
+    _script(tmp_path / "pgrep", "exit 1\n")
+    for browser in ("firefox", "chromium", "xdg-open"):
+        shutil.copyfile(tmp_path / "browser", tmp_path / browser)
+        (tmp_path / browser).chmod(0o755)
+    # Fake only Gio's desktop lookup. Run the wrapper's actual Python parsing,
+    # validation and executable lookup, without reading real user associations.
+    helper = tmp_path / "helper"
+    _script(helper,
+            f'printf "%s\\0" "$@" > {shlex.quote(str(tmp_path / "helper_args"))}\n'
+            "exit 1\n")
+    wrapper = tmp_path / "wrapper.sh"
+    wrapper.write_text(Path(WRAPPER).read_text().replace(
+        "SSO_HELPER=/usr/libexec/gpclient/sso-window-helper",
+        "SSO_HELPER=" + shlex.quote(str(helper))))
+    monkeypatch.setitem(globals(), "WRAPPER", str(wrapper))
+    fake_modules = tmp_path / "modules"
+    (fake_modules / "gi" / "repository").mkdir(parents=True)
+    (fake_modules / "gi" / "__init__.py").write_text("")
+    (fake_modules / "gi" / "repository" / "__init__.py").write_text(
+        "class Info:\n"
+        f"    def get_commandline(self): return {command!r}\n"
+        "class Gio:\n"
+        "    class AppInfo:\n"
+        "        @staticmethod\n"
+        "        def get_default_for_uri_scheme(scheme):\n"
+        "            assert scheme == 'http'\n"
+        "            return Info()\n"
+    )
+    _script(tmp_path / "python3",
+            f'printf "%s\\n" "$HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" '
+            f'> {shlex.quote(str(tmp_path / "lookup_env"))}\n'
+            f'export PYTHONPATH={shlex.quote(str(fake_modules))}\n'
+            f'exec {shlex.quote(sys.executable)} "$@"\n')
+    result = _run_wrapper(_root_env(tmp_path, SUDO_UID=str(FAKE_UID),
+                                    GP_BROWSER=selection))
+    assert result.returncode == 0, result.stderr
+    args = (tmp_path / "helper_args").read_bytes().decode().rstrip("\0").split("\0")
+    assert args[:2] == [str(tmp_path / (expected or "xdg-open")), URL]
+    flags = (tmp_path / "opened").read_text().strip().split()
+    assert args[2:] == flags
+    if expected == "firefox":
+        assert flags == ["--new-window", URL]
+    elif expected == "chromium":
+        assert "--app=" + URL in flags
+        assert URL not in flags
+    else:
+        assert flags == [URL]
+    assert (tmp_path / "lookup_env").read_text().splitlines() == [
+        str(tmp_path / "home"), str(tmp_path / "home" / ".config"),
+        str(tmp_path / "home" / ".local" / "share"),
+    ]
+    assert not (tmp_path / "pwned").exists()

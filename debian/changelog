@@ -1,3 +1,19 @@
+network-manager-gpclient (1.5.1-1) unstable; urgency=medium
+
+  * Add optional GNOME Wayland SSO login-window tracking for Firefox and
+    Chromium. Only the dedicated login window closes after VPN activation.
+  * Include the GNOME Shell extension and its compiled settings schema in
+    network-manager-gpclient-gnome.
+  * Build with Rust 1.89, as required by the checked-out gpclient source.
+  * Add a per-connection browser-closing checkbox to GTK3, GTK4 and Plasma
+    editors; enlarge the forms and make GTK settings vertically scrollable.
+  * Generate a legacy GNOME 42-44 adapter for Ubuntu 22.04 and add a session-user
+    KWin 5/6 adapter. Support X11 and Wayland with exact window tracking.
+  * Replace the global closing preference with the explicit VPN profile option;
+    package the KWin bridge and its GI runtime dependencies.
+
+ -- NicoCatalano <nicocata94@gmail.com>  Sun, 18 Oct 2026 12:00:00 +0200
+
 network-manager-gpclient (1.5.0-1) unstable; urgency=medium
 
   * Fix the wrong gateway being selected from a paged gateway list (closes

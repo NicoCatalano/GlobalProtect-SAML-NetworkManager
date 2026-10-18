@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=GlobalProtect authentication callback
+Exec=/usr/bin/gpclient launch-gui %u
+Type=Application
+NoDisplay=true
+MimeType=x-scheme-handler/globalprotectcallback;

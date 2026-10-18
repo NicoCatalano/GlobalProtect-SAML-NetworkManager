@@ -1,0 +1,22 @@
+diff --git a/plugins/gnome/nm-gpclient-service.name b/plugins/gnome/nm-gpclient-service.name
+index 29d7806..617db1e 100644
+--- a/plugins/gnome/nm-gpclient-service.name
++++ b/plugins/gnome/nm-gpclient-service.name
+@@ -1,7 +1,7 @@
+ [VPN Connection]
+ name=GlobalProtect
+ service=org.freedesktop.NetworkManager.gpclient
+-program=/usr/lib/NetworkManager/nm-gpclient-service
++program=/usr/lib/NetworkManager/nm-gpclient-systemd-activate
+ 
+ [libnm]
+ plugin=libnm-vpn-plugin-gpclient.so
+diff --git a/scripts/nm-gpclient-systemd-activate b/scripts/nm-gpclient-systemd-activate
+new file mode 100755
+index 0000000..b3b8d2e
+--- /dev/null
++++ b/scripts/nm-gpclient-systemd-activate
+@@ -0,0 +1,3 @@
++#!/bin/sh
++set -eu
++exec /usr/bin/systemctl start nm-gpclient.service

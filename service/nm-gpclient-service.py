@@ -24,6 +24,7 @@ import subprocess
 import sys
 import termios
 import unicodedata
+import uuid
 from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
@@ -1070,6 +1071,61 @@ class ScreenBuffer:
                 self._rows = [[] for _ in self._rows]
 
 
+class BusNameOwner(DbusInterfaceCommonAsync,
+                   interface_name="org.freedesktop.DBus"):
+    @dbus_method_async(input_signature="s", result_signature="s")
+    async def get_name_owner(self, name: str) -> str:
+        raise NotImplementedError
+
+
+class NMActiveConnections(DbusInterfaceCommonAsync,
+                          interface_name="org.freedesktop.NetworkManager"):
+    @dbus_property_async("ao")
+    def active_connections(self) -> List[str]:
+        raise NotImplementedError
+
+
+class NMActivation(DbusInterfaceCommonAsync,
+                   interface_name="org.freedesktop.NetworkManager.Connection.Active"):
+    @dbus_property_async("s")
+    def uuid(self) -> str:
+        raise NotImplementedError
+
+    @dbus_property_async("u")
+    def state(self) -> int:
+        raise NotImplementedError
+
+    @dbus_property_async("b")
+    def vpn(self) -> bool:
+        raise NotImplementedError
+
+
+async def sso_activation_identity(connection_uuid: str) -> Tuple[str, str]:
+    """Snapshot one activating VPN before starting auth; never resolve on retry."""
+    if not connection_uuid:
+        return "", ""
+
+    async def find():
+        daemon = BusNameOwner.new_proxy("org.freedesktop.DBus", "/org/freedesktop/DBus")
+        owner = await daemon.get_name_owner("org.freedesktop.NetworkManager")
+        manager = NMActiveConnections.new_proxy(
+            owner, "/org/freedesktop/NetworkManager"
+        )
+        matches = []
+        for path in await manager.active_connections:
+            active = NMActivation.new_proxy(owner, path)
+            if (await active.uuid == connection_uuid and await active.vpn
+                    and await active.state == 1):
+                matches.append(path)
+        return (matches[0], owner) if len(matches) == 1 else ("", "")
+
+    try:
+        return await asyncio.wait_for(find(), timeout=1)
+    except Exception:
+        # Optional integration must never prevent normal authentication.
+        return "", ""
+
+
 class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFACE_VPN):
     """NetworkManager VPN Plugin for gpclient using python-sdbus"""
 
@@ -1098,6 +1154,9 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self.as_gateway = False
         self.preferred_gateway = ""
         self._connection_uuid = ""
+        self._sso_active_path = ""
+        self._sso_nm_owner = ""
+        self._sso_attempt = ""
         self._gateway_list: List[str] = []  # discovered during this attempt
         self._stored_gateway_list = ""  # what the profile already has cached
         self._stored_gateway_count: Optional[int] = None  # gateway-list-count
@@ -1322,6 +1381,11 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                 uuid_raw[1] if isinstance(uuid_raw, tuple) else uuid_raw
             ) or ""
 
+            self._sso_active_path, self._sso_nm_owner = await sso_activation_identity(
+                self._connection_uuid
+            )
+            self._sso_attempt = uuid.uuid4().hex
+
             # Get the server address (required). This is the portal address, or
             # a gateway address when as-gateway is set.
             self.gateway = data_dict.get("gateway", "")
@@ -1496,6 +1560,9 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self.as_gateway = False
         self.preferred_gateway = ""
         self._connection_uuid = ""
+        self._sso_active_path = ""
+        self._sso_nm_owner = ""
+        self._sso_attempt = ""
         self._gateway_list = []
         self._stored_gateway_list = ""
         self._stored_gateway_count = None
@@ -1858,6 +1925,16 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                         "No DISPLAY/WAYLAND_DISPLAY found in the user's session - "
                         "the authentication browser may fail to open a window"
                     )
+
+            # gpclient and gpauth inherit these values (Command does not clear
+            # the environment). Bind to the object captured before auth starts.
+            for key in ("GP_SSO_UUID", "GP_SSO_ACTIVE_PATH", "GP_SSO_ATTEMPT", "GP_SSO_NM_OWNER"):
+                env.pop(key, None)
+            if self._sso_active_path:
+                env["GP_SSO_UUID"] = self._connection_uuid
+                env["GP_SSO_ACTIVE_PATH"] = self._sso_active_path
+                env["GP_SSO_ATTEMPT"] = self._sso_attempt
+                env["GP_SSO_NM_OWNER"] = self._sso_nm_owner
 
             # Tell the wrapper which browser to launch
             if self.browser_target:

@@ -17,6 +17,7 @@ struct _NMGpclientEditor {
     GtkWidget *browser_combo;
     GtkWidget *dns_entry;
     GtkWidget *hip_check;
+    GtkWidget *close_browser_check;
     GtkWidget *fix_openssl_combo;
 };
 
@@ -294,6 +295,16 @@ build_ui (NMGpclientEditor *self)
     g_signal_connect (self->dns_entry, "changed", G_CALLBACK (entry_changed_cb), self);
     gtk_grid_attach (GTK_GRID (grid), self->dns_entry, 1, row++, 1, 1);
 
+    /* Per-connection SSO closing preference. Unsupported desktops leave it open. */
+    self->close_browser_check = gtk_check_button_new_with_label ("Close login window after VPN connects");
+    gtk_widget_set_tooltip_text (self->close_browser_check,
+        "Close only the dedicated SSO login window after the VPN connects.\n"
+        "Requires the GNOME companion or KDE Plasma KWin adapter.");
+    value = s_vpn ? nm_setting_vpn_get_data_item (s_vpn, "close-browser") : NULL;
+    gtk_check_button_set_active (GTK_CHECK_BUTTON (self->close_browser_check), g_strcmp0 (value, "true") == 0);
+    g_signal_connect (self->close_browser_check, "toggled", G_CALLBACK (check_toggled_cb), self);
+    gtk_grid_attach (GTK_GRID (grid), self->close_browser_check, 1, row++, 1, 1);
+
     /* HIP checkbox */
     label = gtk_label_new ("HIP:");
     gtk_widget_set_halign (label, GTK_ALIGN_START);
@@ -314,7 +325,16 @@ build_ui (NMGpclientEditor *self)
     g_signal_connect (self->hip_check, "toggled", G_CALLBACK (check_toggled_cb), self);
     gtk_grid_attach (GTK_GRID (grid), self->hip_check, 1, row++, 1, 1);
 
-    return grid;
+    GtkWidget *scroll = gtk_scrolled_window_new ();
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), grid);
+    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_min_content_width (GTK_SCROLLED_WINDOW (scroll), 660);
+    gtk_scrolled_window_set_min_content_height (GTK_SCROLLED_WINDOW (scroll), 360);
+    gtk_scrolled_window_set_max_content_height (GTK_SCROLLED_WINDOW (scroll), 560);
+    gtk_scrolled_window_set_propagate_natural_height (GTK_SCROLLED_WINDOW (scroll), TRUE);
+    gtk_widget_set_hexpand (scroll, TRUE);
+    gtk_widget_set_vexpand (scroll, TRUE);
+    return scroll;
 }
 
 static GObject *
@@ -411,6 +431,9 @@ update_connection (NMVpnEditor *editor,
         nm_setting_vpn_remove_data_item (s_vpn, "fix-openssl");
         break;
     }
+
+    nm_setting_vpn_add_data_item (s_vpn, "close-browser",
+        gtk_check_button_get_active (GTK_CHECK_BUTTON (self->close_browser_check)) ? "true" : "false");
 
     /* Save HIP */
     if (gtk_check_button_get_active (GTK_CHECK_BUTTON (self->hip_check)))

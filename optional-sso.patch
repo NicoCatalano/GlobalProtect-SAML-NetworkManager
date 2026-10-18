@@ -1,0 +1,1532 @@
+diff --git a/Makefile b/Makefile
+index 0e608a8..05a0d25 100644
+--- a/Makefile
++++ b/Makefile
+@@ -6,7 +6,7 @@ GPOC_DIR = external/GlobalProtect-openconnect
+ RUSTUP_HOME ?= $(HOME)/.rustup
+ CARGO_HOME ?= $(HOME)/.cargo
+ CARGO = $(CARGO_HOME)/bin/cargo
+-RUST_VERSION = 1.85
++RUST_VERSION = 1.89
+ 
+ # Main targets
+ all: gnome-plugins gpclient gpauth
+@@ -51,6 +51,10 @@ install: all
+ 	# Install Python service
+ 	install -D -m 755 service/nm-gpclient-service.py /usr/lib/NetworkManager/nm-gpclient-service
+ 	# Install scripts
++	install -D -m 755 scripts/nm-gpclient-systemd-activate /usr/lib/NetworkManager/nm-gpclient-systemd-activate
++	install -D -m 755 scripts/sso-window-helper.py /usr/libexec/gpclient/sso-window-helper
++	install -D -m 644 scripts/kwin-sso-helper.py /usr/libexec/gpclient/kwin-sso-helper.py
++	install -D -m 644 scripts/kwin-sso.js /usr/libexec/gpclient/kwin-sso.js
+ 	install -D -m 755 scripts/browser-wrapper.sh /usr/libexec/gpclient/browser-wrapper
+ 	install -D -m 755 scripts/edge-wrapper.sh /usr/libexec/gpclient/edge-wrapper
+ 	# Install auth dialog (interactive credentials/RSA token prompts)
+@@ -124,6 +128,10 @@ install-dev: gnome-plugins
+ 	sudo install -m 755 service/nm-gpclient-service.py $(NM_LIB_DIR)/nm-gpclient-service
+ 
+ 	# Install helper scripts
++	sudo install -m 755 scripts/nm-gpclient-systemd-activate $(NM_LIB_DIR)/nm-gpclient-systemd-activate
++	sudo install -m 755 scripts/sso-window-helper.py $(NM_LIBEXEC_DIR)/sso-window-helper
++	sudo install -m 644 scripts/kwin-sso-helper.py $(NM_LIBEXEC_DIR)/kwin-sso-helper.py
++	sudo install -m 644 scripts/kwin-sso.js $(NM_LIBEXEC_DIR)/kwin-sso.js
+ 	sudo install -m 755 scripts/browser-wrapper.sh $(NM_LIBEXEC_DIR)/browser-wrapper
+ 	sudo install -m 755 scripts/edge-wrapper.sh $(NM_LIBEXEC_DIR)/edge-wrapper
+ 
+@@ -152,6 +160,7 @@ uninstall-dev:
+ 	sudo rm -f $(NM_VPN_DIR)/libnm-gtk4-vpn-plugin-gpclient-editor.so
+ 	sudo rm -f $(NM_LIB_DIR)/VPN/nm-gpclient-service.name
+ 	sudo rm -f $(NM_LIB_DIR)/nm-gpclient-service
++	sudo rm -f $(NM_LIB_DIR)/nm-gpclient-systemd-activate
+ 	sudo rm -f /usr/lib/libnm-gpclient-properties
+ 	sudo rm -rf $(NM_LIBEXEC_DIR)
+ 	sudo rm -f /usr/libexec/nm-gpclient-auth-dialog
+@@ -225,3 +234,16 @@ logs: $(ARTIFACTS_DIR)
+ # Clean test artifacts
+ clean-artifacts:
+ 	rm -rf $(ARTIFACTS_DIR)/*
++
++# Optional companion; installation does not enable it or change its settings.
++SSO_EXTENSION = gpclient-sso@globalprotect-saml-networkmanager
++# Ubuntu 22.04 packages the legacy GNOME 42 adapter. Override for other builds.
++SSO_GNOME_LEGACY ?= $(shell . /etc/os-release; [ "$$ID:$$VERSION_ID" = "ubuntu:22.04" ] && echo 1 || echo 0)
++.PHONY: install-sso-extension
++install-sso-extension:
++	install -d "$(DESTDIR)/usr/share/gnome-shell/extensions/$(SSO_EXTENSION)/schemas"
++	install -m 644 extensions/$(SSO_EXTENSION)/*.js extensions/$(SSO_EXTENSION)/metadata.json "$(DESTDIR)/usr/share/gnome-shell/extensions/$(SSO_EXTENSION)/"
++	install -m 644 extensions/$(SSO_EXTENSION)/schemas/*.xml "$(DESTDIR)/usr/share/gnome-shell/extensions/$(SSO_EXTENSION)/schemas/"
++	glib-compile-schemas "$(DESTDIR)/usr/share/gnome-shell/extensions/$(SSO_EXTENSION)/schemas"
++
++	@if [ "$(SSO_GNOME_LEGACY)" = 1 ]; then python3 scripts/build-legacy-extension.py "$(DESTDIR)/usr/share/gnome-shell/extensions/$(SSO_EXTENSION)"; fi
+diff --git a/debian/rules b/debian/rules
+index 8763e74..15ed874 100755
+--- a/debian/rules
++++ b/debian/rules
+@@ -89,6 +89,9 @@ ifneq ($(HAS_CORE),)
+ 	# Install auth dialog (interactive credentials/RSA token prompts, GTK)
+ 	install -D -m 755 auth-dialog/nm-gpclient-auth-dialog.py \
+ 		$(CURDIR)/debian/network-manager-gpclient-gnome/usr/libexec/nm-gpclient-auth-dialog
++
++	# Ship the optional GNOME Wayland SSO window extension with the GNOME package.
++	$(MAKE) DESTDIR=$(CURDIR)/debian/network-manager-gpclient-gnome install-sso-extension
+ endif
+ 
+ 	# Install Plasma plugin (into network-manager-gpclient-plasma, or into
+@@ -113,6 +116,14 @@ ifneq ($(HAS_CORE),)
+ 		$(CURDIR)/debian/network-manager-gpclient/usr/lib/NetworkManager/VPN/nm-gpclient-service.name
+ 	install -D -m 755 service/nm-gpclient-service.py \
+ 		$(CURDIR)/debian/network-manager-gpclient/usr/lib/NetworkManager/nm-gpclient-service
++	install -D -m 755 scripts/nm-gpclient-systemd-activate \
++		$(CURDIR)/debian/network-manager-gpclient/usr/lib/NetworkManager/nm-gpclient-systemd-activate
++	install -D -m 755 scripts/sso-window-helper.py \
++		$(CURDIR)/debian/network-manager-gpclient/usr/libexec/gpclient/sso-window-helper
++	install -D -m 644 scripts/kwin-sso-helper.py \
++		$(CURDIR)/debian/network-manager-gpclient/usr/libexec/gpclient/kwin-sso-helper.py
++	install -D -m 644 scripts/kwin-sso.js \
++		$(CURDIR)/debian/network-manager-gpclient/usr/libexec/gpclient/kwin-sso.js
+ 	install -D -m 755 scripts/browser-wrapper.sh \
+ 		$(CURDIR)/debian/network-manager-gpclient/usr/libexec/gpclient/browser-wrapper
+ 	install -D -m 755 scripts/edge-wrapper.sh \
+diff --git a/plugins/gnome/nm-gpclient-editor-gtk3.c b/plugins/gnome/nm-gpclient-editor-gtk3.c
+index 411dffb..aac5c76 100644
+--- a/plugins/gnome/nm-gpclient-editor-gtk3.c
++++ b/plugins/gnome/nm-gpclient-editor-gtk3.c
+@@ -22,6 +22,7 @@ struct _NMGpclientEditor {
+     GtkComboBoxText *browser_combo;
+     GtkEntry *dns_entry;
+     GtkCheckButton *hip_check;
++    GtkCheckButton *close_browser_check;
+     GtkComboBoxText *fix_openssl_combo;
+ };
+ 
+@@ -292,6 +293,16 @@ build_ui (NMGpclientEditor *self)
+     g_signal_connect (G_OBJECT (self->dns_entry), "changed", G_CALLBACK (stuff_changed_cb), self);
+     gtk_grid_attach (GTK_GRID (widget), GTK_WIDGET (self->dns_entry), 1, row++, 1, 1);
+ 
++    /* Per-connection SSO closing preference. Unsupported desktops leave it open. */
++    self->close_browser_check = GTK_CHECK_BUTTON (gtk_check_button_new_with_label ("Close login window after VPN connects"));
++    gtk_widget_set_tooltip_text (GTK_WIDGET (self->close_browser_check),
++        "Close only the dedicated SSO login window after the VPN connects.\n"
++        "Requires the GNOME companion or KDE Plasma KWin adapter.");
++    value = s_vpn ? nm_setting_vpn_get_data_item (s_vpn, "close-browser") : NULL;
++    gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (self->close_browser_check), g_strcmp0 (value, "true") == 0);
++    g_signal_connect (G_OBJECT (self->close_browser_check), "toggled", G_CALLBACK (stuff_changed_cb), self);
++    gtk_grid_attach (GTK_GRID (widget), GTK_WIDGET (self->close_browser_check), 1, row++, 1, 1);
++
+     /* HIP */
+     label = gtk_label_new ("HIP:");
+     gtk_widget_set_halign (label, GTK_ALIGN_START);
+@@ -312,9 +323,17 @@ build_ui (NMGpclientEditor *self)
+     g_signal_connect (G_OBJECT (self->hip_check), "toggled", G_CALLBACK (stuff_changed_cb), self);
+     gtk_grid_attach (GTK_GRID (widget), GTK_WIDGET (self->hip_check), 1, row++, 1, 1);
+ 
+-    gtk_widget_show_all (widget);
+-
+-    return widget;
++    GtkWidget *scroll = gtk_scrolled_window_new (NULL, NULL);
++    gtk_container_add (GTK_CONTAINER (scroll), widget);
++    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
++    gtk_scrolled_window_set_min_content_width (GTK_SCROLLED_WINDOW (scroll), 660);
++    gtk_scrolled_window_set_min_content_height (GTK_SCROLLED_WINDOW (scroll), 360);
++    gtk_scrolled_window_set_max_content_height (GTK_SCROLLED_WINDOW (scroll), 560);
++    gtk_scrolled_window_set_propagate_natural_height (GTK_SCROLLED_WINDOW (scroll), TRUE);
++    gtk_widget_set_hexpand (scroll, TRUE);
++    gtk_widget_set_vexpand (scroll, TRUE);
++    gtk_widget_show_all (scroll);
++    return scroll;
+ }
+ 
+ static gboolean
+@@ -416,6 +435,10 @@ update_connection (NMVpnEditor *iface,
+         }
+     }
+ 
++    if (self->close_browser_check)
++        nm_setting_vpn_add_data_item (s_vpn, "close-browser",
++            gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (self->close_browser_check)) ? "true" : "false");
++
+     if (self->hip_check) {
+         if (gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (self->hip_check)))
+             nm_setting_vpn_add_data_item (s_vpn, "hip", "true");
+@@ -485,6 +508,7 @@ nm_gpclient_editor_init (NMGpclientEditor *self)
+     self->browser_combo = NULL;
+     self->dns_entry = NULL;
+     self->hip_check = NULL;
++    self->close_browser_check = NULL;
+     self->fix_openssl_combo = NULL;
+ }
+ 
+diff --git a/plugins/gnome/nm-gpclient-editor.c b/plugins/gnome/nm-gpclient-editor.c
+index 688a02e..8f244c3 100644
+--- a/plugins/gnome/nm-gpclient-editor.c
++++ b/plugins/gnome/nm-gpclient-editor.c
+@@ -17,6 +17,7 @@ struct _NMGpclientEditor {
+     GtkWidget *browser_combo;
+     GtkWidget *dns_entry;
+     GtkWidget *hip_check;
++    GtkWidget *close_browser_check;
+     GtkWidget *fix_openssl_combo;
+ };
+ 
+@@ -294,6 +295,16 @@ build_ui (NMGpclientEditor *self)
+     g_signal_connect (self->dns_entry, "changed", G_CALLBACK (entry_changed_cb), self);
+     gtk_grid_attach (GTK_GRID (grid), self->dns_entry, 1, row++, 1, 1);
+ 
++    /* Per-connection SSO closing preference. Unsupported desktops leave it open. */
++    self->close_browser_check = gtk_check_button_new_with_label ("Close login window after VPN connects");
++    gtk_widget_set_tooltip_text (self->close_browser_check,
++        "Close only the dedicated SSO login window after the VPN connects.\n"
++        "Requires the GNOME companion or KDE Plasma KWin adapter.");
++    value = s_vpn ? nm_setting_vpn_get_data_item (s_vpn, "close-browser") : NULL;
++    gtk_check_button_set_active (GTK_CHECK_BUTTON (self->close_browser_check), g_strcmp0 (value, "true") == 0);
++    g_signal_connect (self->close_browser_check, "toggled", G_CALLBACK (check_toggled_cb), self);
++    gtk_grid_attach (GTK_GRID (grid), self->close_browser_check, 1, row++, 1, 1);
++
+     /* HIP checkbox */
+     label = gtk_label_new ("HIP:");
+     gtk_widget_set_halign (label, GTK_ALIGN_START);
+@@ -314,7 +325,16 @@ build_ui (NMGpclientEditor *self)
+     g_signal_connect (self->hip_check, "toggled", G_CALLBACK (check_toggled_cb), self);
+     gtk_grid_attach (GTK_GRID (grid), self->hip_check, 1, row++, 1, 1);
+ 
+-    return grid;
++    GtkWidget *scroll = gtk_scrolled_window_new ();
++    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), grid);
++    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
++    gtk_scrolled_window_set_min_content_width (GTK_SCROLLED_WINDOW (scroll), 660);
++    gtk_scrolled_window_set_min_content_height (GTK_SCROLLED_WINDOW (scroll), 360);
++    gtk_scrolled_window_set_max_content_height (GTK_SCROLLED_WINDOW (scroll), 560);
++    gtk_scrolled_window_set_propagate_natural_height (GTK_SCROLLED_WINDOW (scroll), TRUE);
++    gtk_widget_set_hexpand (scroll, TRUE);
++    gtk_widget_set_vexpand (scroll, TRUE);
++    return scroll;
+ }
+ 
+ static GObject *
+@@ -412,6 +432,9 @@ update_connection (NMVpnEditor *editor,
+         break;
+     }
+ 
++    nm_setting_vpn_add_data_item (s_vpn, "close-browser",
++        gtk_check_button_get_active (GTK_CHECK_BUTTON (self->close_browser_check)) ? "true" : "false");
++
+     /* Save HIP */
+     if (gtk_check_button_get_active (GTK_CHECK_BUTTON (self->hip_check)))
+         nm_setting_vpn_add_data_item (s_vpn, "hip", "true");
+diff --git a/plugins/plasma/gpclientwidget.cpp b/plugins/plasma/gpclientwidget.cpp
+index 27841a9..a2f15bf 100644
+--- a/plugins/plasma/gpclientwidget.cpp
++++ b/plugins/plasma/gpclientwidget.cpp
+@@ -57,6 +57,7 @@ GpclientWidget::GpclientWidget(const NetworkManager::VpnSetting::Ptr &setting, Q
+     connect(m_ui->usernameLineEdit, &QLineEdit::textChanged, this, &GpclientWidget::settingChanged);
+     connect(m_ui->browserComboBox, &QComboBox::currentTextChanged, this, &GpclientWidget::settingChanged);
+     connect(m_ui->dnsLineEdit, &QLineEdit::textChanged, this, &GpclientWidget::settingChanged);
++    connect(m_ui->closeBrowserCheckBox, &QCheckBox::toggled, this, &GpclientWidget::settingChanged);
+     connect(m_ui->hipCheckBox, &QCheckBox::toggled, this, &GpclientWidget::settingChanged);
+     connect(m_ui->fixOpensslComboBox, &QComboBox::currentTextChanged, this, &GpclientWidget::settingChanged);
+ 
+@@ -153,6 +154,7 @@ void GpclientWidget::loadConfig(const NetworkManager::Setting::Ptr &setting)
+         }
+ 
+         // Load HIP (default: enabled)
++        m_ui->closeBrowserCheckBox->setChecked(data.value(QLatin1String("close-browser")) == QLatin1String("true"));
+         const QString hipValue = data.value(QLatin1String("hip"), QLatin1String("true"));
+         m_ui->hipCheckBox->setChecked(hipValue.toLower() == QLatin1String("true"));
+     }
+@@ -233,6 +235,9 @@ QVariantMap GpclientWidget::setting() const
+         break;
+     }
+ 
++    data.insert(QLatin1String("close-browser"),
++                m_ui->closeBrowserCheckBox->isChecked() ? QLatin1String("true") : QLatin1String("false"));
++
+     // Save HIP
+     data.insert(QLatin1String("hip"),
+                 m_ui->hipCheckBox->isChecked() ? QLatin1String("true") : QLatin1String("false"));
+diff --git a/plugins/plasma/gpclientwidget.ui b/plugins/plasma/gpclientwidget.ui
+index 42ba373..28a42d8 100644
+--- a/plugins/plasma/gpclientwidget.ui
++++ b/plugins/plasma/gpclientwidget.ui
+@@ -6,10 +6,13 @@
+    <rect>
+     <x>0</x>
+     <y>0</y>
+-    <width>460</width>
+-    <height>300</height>
++    <width>700</width>
++    <height>540</height>
+    </rect>
+   </property>
++  <property name="minimumSize">
++   <size><width>660</width><height>420</height></size>
++  </property>
+   <property name="windowTitle">
+    <string>GlobalProtect VPN</string>
+   </property>
+@@ -175,6 +178,16 @@ Automatic: retry once with the workaround when the portal asks for it, and switc
+      </property>
+     </widget>
+    </item>
++   <item row="9" column="1">
++    <widget class="QCheckBox" name="closeBrowserCheckBox">
++     <property name="text">
++      <string>Close login window after VPN connects</string>
++     </property>
++     <property name="toolTip">
++      <string>Close only the dedicated login window after the VPN connects. Requires the KWin SSO adapter or GNOME companion.</string>
++     </property>
++    </widget>
++   </item>
+   </layout>
+  </widget>
+  <resources/>
+diff --git a/scripts/browser-wrapper.sh b/scripts/browser-wrapper.sh
+index b5019c1..cf4ca1d 100644
+--- a/scripts/browser-wrapper.sh
++++ b/scripts/browser-wrapper.sh
+@@ -7,12 +7,10 @@
+ # has no usable DISPLAY/WAYLAND_DISPLAY/XDG_RUNTIME_DIR/DBUS_SESSION_BUS_ADDRESS
+ # and silently fails to open a window (issue #7). This wrapper reconstructs the
+ # session environment, works around NetworkManager's ProtectHome=read-only
+-# sandbox, and closes the browser once the authentication is done.
++# sandbox, and optionally registers a dedicated SSO window with GNOME Shell.
+ #
+ # Which browser to launch comes from $GP_BROWSER (set by nm-gpclient-service);
+-# without it we autodetect. $GP_AUTH_TIMEOUT overrides the 300 s safety timeout.
+-
+-MAX_WAIT="${GP_AUTH_TIMEOUT:-300}"
++# without it we autodetect. Browser lifetime is controlled only by GNOME Shell.
+ 
+ # LOG_FILE is set after REAL_UID is known (security: per-user log file). Until
+ # then log() must go to stderr, so an inherited LOG_FILE cannot receive messages
+@@ -119,8 +117,8 @@ fi
+ # Per-user log file (security: prevent symlink attack). The name is kept from
+ # the old edge-only wrapper so existing troubleshooting docs stay valid.
+ LOG_FILE="/tmp/edge-wrapper-$REAL_UID.log"
+-log "called with args: $*"
+-log "EUID=$EUID USER=${USER:-} SUDO_UID=${SUDO_UID:-} SUDO_USER=${SUDO_USER:-} PKEXEC_UID=${PKEXEC_UID:-} DOAS_USER=${DOAS_USER:-} GP_BROWSER=${GP_BROWSER:-unset} GP_AUTH_TIMEOUT=$MAX_WAIT"
++log "called for browser authentication"
++log "EUID=$EUID USER=${USER:-} SUDO_UID=${SUDO_UID:-} SUDO_USER=${SUDO_USER:-} PKEXEC_UID=${PKEXEC_UID:-} DOAS_USER=${DOAS_USER:-} GP_BROWSER=${GP_BROWSER:-unset}"
+ log "resolved real user: $REAL_USER (uid=$REAL_UID) home=$REAL_HOME"
+ 
+ # --- Pick the browser binary ------------------------------------------------
+@@ -161,14 +159,6 @@ if [ -z "$BROWSER_BIN" ]; then
+     exit 1
+ fi
+ 
+-case "$(basename "$BROWSER_BIN")" in
+-    microsoft-edge*)                     FAMILY=edge ;;
+-    google-chrome*|chrome|chromium*)     FAMILY=chromium ;;
+-    firefox*)                            FAMILY=firefox ;;
+-    *)                                   FAMILY=other ;;
+-esac
+-log "browser: $BROWSER_BIN (family=$FAMILY)"
+-
+ # --- Reconstruct the user's session environment -----------------------------
+ 
+ # Detect Wayland socket (fallback to wayland-0)
+@@ -249,6 +239,60 @@ for var in XDG_CURRENT_DESKTOP KDE_FULL_SESSION KDE_SESSION_VERSION; do
+     [ -n "$value" ] && DESKTOP_ENV+=("$var=$value")
+ done
+ 
++# Resolve the desktop default in the desktop user's context, never as root.
++# xdg-open may reuse a tab, which cannot safely be closed by the window tracker.
++# Accept only plain known-browser desktop commands; retain xdg-open for custom
++# launchers/options rather than discard a configured profile or execute a shell.
++query_default_browser() {
++    local config_home data_home data_dirs
++    config_home=$(session_env_var XDG_CONFIG_HOME)
++    data_home=$(session_env_var XDG_DATA_HOME)
++    data_dirs=$(session_env_var XDG_DATA_DIRS)
++    local lookup_env=(
++        "HOME=$REAL_HOME"
++        "XDG_CONFIG_HOME=${config_home:-$REAL_HOME/.config}"
++        "XDG_DATA_HOME=${data_home:-$REAL_HOME/.local/share}"
++        "XDG_DATA_DIRS=${data_dirs:-${XDG_DATA_DIRS:-/usr/local/share:/usr/share}}"
++        "XDG_RUNTIME_DIR=/run/user/$REAL_UID"
++        "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$REAL_UID/bus"
++        "${DESKTOP_ENV[@]}"
++    )
++    local drop_user=()
++    [ "$EUID" -eq 0 ] && drop_user=(sudo -u "#$REAL_UID")
++    "${drop_user[@]}" env "${lookup_env[@]}" python3 -c '
++import os
++import shlex
++import shutil
++from gi.repository import Gio
++app = Gio.AppInfo.get_default_for_uri_scheme("http")
++args = shlex.split(app.get_commandline() or "") if app else []
++known = {"firefox", "firefox-esr", "firefox-developer-edition", "firefox-nightly",
++         "chromium", "chromium-browser", "google-chrome", "google-chrome-stable",
++         "google-chrome-beta", "google-chrome-unstable", "microsoft-edge",
++         "microsoft-edge-stable", "microsoft-edge-beta", "microsoft-edge-dev"}
++if (args and os.path.basename(args[0]) in known
++        and args[1:] in (["%u"], ["%U"])):
++    binary = shutil.which(args[0])
++    if binary:
++        print(binary)
++' 2>/dev/null
++}
++
++if [[ "${GP_BROWSER:-}" = default || "${GP_BROWSER:-}" = xdg-open ]]; then
++    DEFAULT_BROWSER_BIN=$(query_default_browser)
++    if [ -n "$DEFAULT_BROWSER_BIN" ] && [ -x "$DEFAULT_BROWSER_BIN" ]; then
++        BROWSER_BIN="$DEFAULT_BROWSER_BIN"
++    fi
++fi
++
++case "$(basename "$BROWSER_BIN")" in
++    microsoft-edge*)                     FAMILY=edge ;;
++    google-chrome*|chrome|chromium*)     FAMILY=chromium ;;
++    firefox*)                            FAMILY=firefox ;;
++    *)                                   FAMILY=other ;;
++esac
++log "browser: $BROWSER_BIN (family=$FAMILY)"
++
+ # --- Profile / HOME workaround for ProtectHome=read-only --------------------
+ 
+ TEMP_BASE="/tmp/edge-wrapper-$REAL_UID"
+@@ -331,17 +375,14 @@ BROWSER_FLAGS=()
+ case "$FAMILY" in
+     edge|chromium)
+         write_chromium_policy
++        PROFILE_FLAGS=()
+         if [ "$HOME_IS_RO" -eq 1 ]; then
+             PROFILE_DIR="$ALT_PROFILE_DIR"
+             mkdir -p "$PROFILE_DIR/Crash Reports" "$EFFECTIVE_HOME/.config/Crash Reports" 2>/dev/null
+-        else
+-            # Reuse the user's real profile so existing SSO cookies apply
+-            case "$(basename "$BROWSER_BIN")" in
+-                microsoft-edge*) PROFILE_DIR="$REAL_HOME/.config/microsoft-edge" ;;
+-                chromium*)       PROFILE_DIR="$REAL_HOME/.config/chromium" ;;
+-                *)               PROFILE_DIR="$REAL_HOME/.config/google-chrome" ;;
+-            esac
++            PROFILE_FLAGS=("--user-data-dir=$PROFILE_DIR")
+         fi
++        # With a writable home let the browser select its normal profile,
++        # including its release channel and most recently selected profile.
+         BROWSER_FLAGS=(
+             "--no-first-run"
+             "--no-default-browser-check"
+@@ -355,7 +396,7 @@ case "$FAMILY" in
+             "--disable-features=msEdgeSyncService,TranslateUI,EdgeCollections,msEdgeSweeperMode,ExternalProtocolDialog"
+             "--app=$URL"
+             "--window-size=896,964"
+-            "--user-data-dir=$PROFILE_DIR"
++            "${PROFILE_FLAGS[@]}"
+         )
+         if [ "$SESSION_TYPE" = "wayland" ]; then
+             BROWSER_FLAGS=("--ozone-platform=wayland" "--enable-features=UseOzonePlatform" "${BROWSER_FLAGS[@]}")
+@@ -374,68 +415,27 @@ case "$FAMILY" in
+         ;;
+ esac
+ 
+-# --- gpauth is the authoritative "authentication finished" signal -----------
+-#
+-# gpauth exits as soon as it receives the callback data, so its death means the
+-# user is done. It cannot be found via $PPID: open::with_detached() double-forks
+-# and calls setsid(), so this wrapper's parent is init, not gpauth.
+-GPAUTH_PID=$(pgrep -n -x -u "$REAL_UID" gpauth 2>/dev/null | head -1)
+-if [ -n "$GPAUTH_PID" ]; then
+-    log "tracking gpauth PID $GPAUTH_PID"
+-else
+-    log "WARNING: no gpauth process found - the browser will not be closed automatically"
+-fi
+-
+-log "env: ${ENV_VARS[*]}"
+-log "cmd: $BROWSER_BIN ${BROWSER_FLAGS[*]}"
+-
+-run_browser_with_monitor() {
+-    env "${ENV_VARS[@]}" "$BROWSER_BIN" "${BROWSER_FLAGS[@]}" 2>>"$LOG_FILE" &
+-    BROWSER_PID=$!
+-    log "started browser with PID=$BROWSER_PID"
+-
+-    # Give the process a moment to fail loudly (bad flags, no display)
+-    sleep 1
+-
+-    if [ -z "$GPAUTH_PID" ]; then
+-        wait "$BROWSER_PID" 2>/dev/null
+-        log "done: browser exited (no gpauth to watch, nothing was killed)"
+-        return 0
+-    fi
++log "launching authentication browser (URL omitted)"
+ 
+-    # Stay alive for as long as gpauth does: that is how long the
+-    # authentication window can appear, so it is also how long the window rule
+-    # has to stay loaded - even when the process we started handed the URL to an
+-    # already running browser and exited straight away.
+-    local elapsed=0 handed_over=0
+-    while kill -0 "$GPAUTH_PID" 2>/dev/null; do
+-        if [ "$handed_over" -eq 0 ] && ! kill -0 "$BROWSER_PID" 2>/dev/null; then
+-            handed_over=1
+-            log "the browser we started exited - the URL went to a running instance"
+-        fi
++# Pass correlation explicitly through sudo, whose default environment is reset.
++ENV_VARS+=("GP_SSO_UUID=${GP_SSO_UUID:-}")
++ENV_VARS+=("GP_SSO_ACTIVE_PATH=${GP_SSO_ACTIVE_PATH:-}")
++ENV_VARS+=("GP_SSO_ATTEMPT=${GP_SSO_ATTEMPT:-}")
++ENV_VARS+=("GP_SSO_NM_OWNER=${GP_SSO_NM_OWNER:-}")
++SSO_HELPER=/usr/libexec/gpclient/sso-window-helper
+ 
+-        if [ "$elapsed" -ge "$MAX_WAIT" ]; then
+-            log "done: timeout after ${MAX_WAIT}s with gpauth still running"
+-            if [ "$handed_over" -eq 0 ]; then
+-                log "killing the browser we started"
+-                kill -9 "$BROWSER_PID" 2>/dev/null
+-                wait "$BROWSER_PID" 2>/dev/null
+-            fi
+-            return 1
++launch_browser() {
++    # Keep each browser's existing launch flags, including app mode and profile.
++    # Reused windows/tabs are rejected by the extension's pre-launch snapshot.
++    if [ "$HOME_IS_RO" -eq 0 ] && [ -x "$SSO_HELPER" ]; then
++        if env "${ENV_VARS[@]}" "$SSO_HELPER" "$BROWSER_BIN" "$URL" "${BROWSER_FLAGS[@]}" 2>>"$LOG_FILE"; then
++            return 0
+         fi
+-
+-        sleep 2
+-        elapsed=$((elapsed + 2))
+-    done
+-
+-    if [ "$handed_over" -eq 1 ]; then
+-        log "done: gpauth ($GPAUTH_PID) exited - authentication finished (window belongs to a running browser, not closing it)"
+-        return 0
++        log "SSO window tracking unavailable; opening browser normally"
+     fi
+-
+-    log "done: gpauth ($GPAUTH_PID) exited - authentication finished, closing browser"
+-    sleep 2
+-    kill "$BROWSER_PID" 2>/dev/null
++    env "${ENV_VARS[@]}" "$BROWSER_BIN" "${BROWSER_FLAGS[@]}" 2>>"$LOG_FILE" &
++    BROWSER_PID=$!
++    log "started browser with PID=$BROWSER_PID; manual closing available"
+     wait "$BROWSER_PID" 2>/dev/null
+     return 0
+ }
+@@ -443,11 +443,11 @@ run_browser_with_monitor() {
+ if [ "$EUID" -eq 0 ]; then
+     # "#uid" makes sudo take a numeric UID, so the name is never involved
+     log "running as root; dropping privileges to $REAL_USER (uid=$REAL_UID) via sudo"
+-    exec sudo -u "#$REAL_UID" bash -c "$(declare -f log run_browser_with_monitor); \
++    exec sudo -u "#$REAL_UID" bash -c "$(declare -f log launch_browser); \
+ ENV_VARS=(${ENV_VARS[*]@Q}); BROWSER_BIN=${BROWSER_BIN@Q}; \
+ BROWSER_FLAGS=(${BROWSER_FLAGS[*]@Q}); LOG_FILE=${LOG_FILE@Q}; \
+-GPAUTH_PID=${GPAUTH_PID@Q}; MAX_WAIT=${MAX_WAIT@Q}; run_browser_with_monitor"
++HOME_IS_RO=${HOME_IS_RO@Q}; SSO_HELPER=${SSO_HELPER@Q}; URL=${URL@Q}; launch_browser"
+ else
+     log "running as EUID=$EUID (no privilege drop needed)"
+-    run_browser_with_monitor
++    launch_browser
+ fi
+diff --git a/service/nm-gpclient-service.py b/service/nm-gpclient-service.py
+index d294d5d..ec5cadf 100644
+--- a/service/nm-gpclient-service.py
++++ b/service/nm-gpclient-service.py
+@@ -24,6 +24,7 @@ import subprocess
+ import sys
+ import termios
+ import unicodedata
++import uuid
+ from collections import deque
+ from pathlib import Path
+ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+@@ -1070,6 +1071,61 @@ class ScreenBuffer:
+                 self._rows = [[] for _ in self._rows]
+ 
+ 
++class BusNameOwner(DbusInterfaceCommonAsync,
++                   interface_name="org.freedesktop.DBus"):
++    @dbus_method_async(input_signature="s", result_signature="s")
++    async def get_name_owner(self, name: str) -> str:
++        raise NotImplementedError
++
++
++class NMActiveConnections(DbusInterfaceCommonAsync,
++                          interface_name="org.freedesktop.NetworkManager"):
++    @dbus_property_async("ao")
++    def active_connections(self) -> List[str]:
++        raise NotImplementedError
++
++
++class NMActivation(DbusInterfaceCommonAsync,
++                   interface_name="org.freedesktop.NetworkManager.Connection.Active"):
++    @dbus_property_async("s")
++    def uuid(self) -> str:
++        raise NotImplementedError
++
++    @dbus_property_async("u")
++    def state(self) -> int:
++        raise NotImplementedError
++
++    @dbus_property_async("b")
++    def vpn(self) -> bool:
++        raise NotImplementedError
++
++
++async def sso_activation_identity(connection_uuid: str) -> Tuple[str, str]:
++    """Snapshot one activating VPN before starting auth; never resolve on retry."""
++    if not connection_uuid:
++        return "", ""
++
++    async def find():
++        daemon = BusNameOwner.new_proxy("org.freedesktop.DBus", "/org/freedesktop/DBus")
++        owner = await daemon.get_name_owner("org.freedesktop.NetworkManager")
++        manager = NMActiveConnections.new_proxy(
++            owner, "/org/freedesktop/NetworkManager"
++        )
++        matches = []
++        for path in await manager.active_connections:
++            active = NMActivation.new_proxy(owner, path)
++            if (await active.uuid == connection_uuid and await active.vpn
++                    and await active.state == 1):
++                matches.append(path)
++        return (matches[0], owner) if len(matches) == 1 else ("", "")
++
++    try:
++        return await asyncio.wait_for(find(), timeout=1)
++    except Exception:
++        # Optional integration must never prevent normal authentication.
++        return "", ""
++
++
+ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFACE_VPN):
+     """NetworkManager VPN Plugin for gpclient using python-sdbus"""
+ 
+@@ -1098,6 +1154,9 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
+         self.as_gateway = False
+         self.preferred_gateway = ""
+         self._connection_uuid = ""
++        self._sso_active_path = ""
++        self._sso_nm_owner = ""
++        self._sso_attempt = ""
+         self._gateway_list: List[str] = []  # discovered during this attempt
+         self._stored_gateway_list = ""  # what the profile already has cached
+         self._stored_gateway_count: Optional[int] = None  # gateway-list-count
+@@ -1322,6 +1381,11 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
+                 uuid_raw[1] if isinstance(uuid_raw, tuple) else uuid_raw
+             ) or ""
+ 
++            self._sso_active_path, self._sso_nm_owner = await sso_activation_identity(
++                self._connection_uuid
++            )
++            self._sso_attempt = uuid.uuid4().hex
++
+             # Get the server address (required). This is the portal address, or
+             # a gateway address when as-gateway is set.
+             self.gateway = data_dict.get("gateway", "")
+@@ -1496,6 +1560,9 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
+         self.as_gateway = False
+         self.preferred_gateway = ""
+         self._connection_uuid = ""
++        self._sso_active_path = ""
++        self._sso_nm_owner = ""
++        self._sso_attempt = ""
+         self._gateway_list = []
+         self._stored_gateway_list = ""
+         self._stored_gateway_count = None
+@@ -1859,6 +1926,16 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
+                         "the authentication browser may fail to open a window"
+                     )
+ 
++            # gpclient and gpauth inherit these values (Command does not clear
++            # the environment). Bind to the object captured before auth starts.
++            for key in ("GP_SSO_UUID", "GP_SSO_ACTIVE_PATH", "GP_SSO_ATTEMPT", "GP_SSO_NM_OWNER"):
++                env.pop(key, None)
++            if self._sso_active_path:
++                env["GP_SSO_UUID"] = self._connection_uuid
++                env["GP_SSO_ACTIVE_PATH"] = self._sso_active_path
++                env["GP_SSO_ATTEMPT"] = self._sso_attempt
++                env["GP_SSO_NM_OWNER"] = self._sso_nm_owner
++
+             # Tell the wrapper which browser to launch
+             if self.browser_target:
+                 env["GP_BROWSER"] = self.browser_target
+diff --git a/scripts/kwin-sso-helper.py b/scripts/kwin-sso-helper.py
+new file mode 100644
+index 0000000..a0937f5
+--- /dev/null
++++ b/scripts/kwin-sso-helper.py
+@@ -0,0 +1,226 @@
++#!/usr/bin/env python3
++"""Optional KWin 5/6 adapter; all calls and temporary files belong to the user."""
++import hashlib
++import json
++import os
++from pathlib import Path
++import subprocess
++import tempfile
++import time
++
++INTERFACE = 'org.gpclient.SsoWindow.Kwin'
++OBJECT_PATH = '/org/gpclient/SsoWindow'
++XML = '''<node><interface name="org.gpclient.SsoWindow.Kwin">
++<method name="Ready"/>
++<method name="Observed"><arg type="b" direction="in"/></method>
++<method name="Poll"><arg type="s" direction="out"/></method>
++<method name="Cancel"/>
++<method name="Finished"><arg type="s" direction="in"/></method>
++</interface></node>'''
++
++
++def activation_key(owner, path):
++    return hashlib.sha256((owner + '\n' + path).encode()).hexdigest()
++
++
++def activation_phase(client, active, owner, uuid, path):
++    if (client.get_dbus_name_owner() != owner or active not in client.get_active_connections()
++            or active.get_uuid() != uuid or active.get_path() != path or not active.get_vpn()):
++        return 'cancelled'
++    return {1: 'pending', 2: 'connected'}.get(int(active.get_state()), 'cancelled')
++
++
++def profile_closes(active):
++    connection = active.get_connection()
++    vpn = connection.get_setting_vpn() if connection else None
++    return bool(vpn and vpn.get_data_item('close-browser') == 'true')
++
++
++def script_source(bus_name, marker):
++    return ('var ssoBus = ' + json.dumps(bus_name) + ';\nvar ssoMarker = ' + json.dumps(marker) + ';\n'
++            + Path(__file__).with_name('kwin-sso.js').read_text())
++
++
++def claim_activation(runtime, owner, path, active_paths):
++    """Retain a failed/expired attempt until its NM activation disappears."""
++    root = Path(runtime)
++    if root.is_symlink() or root.stat().st_uid != os.geteuid():
++        raise ValueError('untrusted runtime directory')
++    directory = root / 'gpclient-sso'
++    directory.mkdir(mode=0o700, exist_ok=True)
++    if directory.is_symlink() or directory.stat().st_uid != os.geteuid() or directory.stat().st_mode & 0o077:
++        raise ValueError('untrusted tracking directory')
++    live = {activation_key(owner, item) for item in active_paths}
++    for item in directory.iterdir():
++        name = item.name.removesuffix('.blocked')
++        if len(name) == 64 and all(c in '0123456789abcdef' for c in name) and name not in live:
++            item.unlink()
++    key = activation_key(owner, path)
++    claim = directory / key
++    try:
++        descriptor = os.open(claim, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
++    except FileExistsError:
++        # Persist cancellation even if the first helper has not exported its
++        # bus object yet, or has already timed out. Never overwrite a file.
++        try:
++            blocked = os.open(claim.with_suffix('.blocked'),
++                              os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
++            os.close(blocked)
++        except FileExistsError:
++            pass
++        raise
++    os.close(descriptor)
++    return claim
++
++
++def main(common):
++    launched = False
++    bus = None
++    registration = None
++    script_name = None
++    kwin_owner = None
++    script_directory = None
++    owned_name = None
++    state = None
++    try:
++        from gi.repository import Gio, GLib, NM
++        if os.geteuid() == 0:
++            return 1
++        browser, url = common.sys.argv[1:3]
++        flags = common.sys.argv[3:]
++        common.validate_auth_url(url)
++        common.landing_command(browser, url, url, flags)
++        uuid = str(common.UUID(os.environ['GP_SSO_UUID']))
++        path = os.environ['GP_SSO_ACTIVE_PATH']
++        owner = os.environ['GP_SSO_NM_OWNER']
++        if (not common.re.fullmatch(r'/org/freedesktop/NetworkManager/ActiveConnection/[0-9]+', path)
++                or not common.re.fullmatch(r':[0-9]+\.[0-9]+', owner)
++                or not common.re.fullmatch(r'[0-9a-f]{32}', os.environ['GP_SSO_ATTEMPT'])):
++            return 1
++        client = NM.Client.new(None)
++        active = next((item for item in client.get_active_connections() if item.get_path() == path), None)
++        if active is None or activation_phase(client, active, owner, uuid, path) != 'pending':
++            return 1
++        close = profile_closes(active)
++        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
++
++        def call(destination, object_path, interface, method, signature, args, reply):
++            return bus.call_sync(destination, object_path, interface, method,
++                                 GLib.Variant(signature, args), GLib.VariantType.new(reply),
++                                 Gio.DBusCallFlags.NO_AUTO_START, 1000, None).unpack()
++
++        kwin_owner = call('org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus',
++                          'GetNameOwner', '(s)', ('org.kde.KWin',), '(s)')[0]
++        bus_name = INTERFACE + '.a' + activation_key(owner, path)
++        try:
++            claim = claim_activation(os.environ['XDG_RUNTIME_DIR'], owner, path,
++                             [item.get_path() for item in client.get_active_connections()])
++        except FileExistsError:
++            # A second portal/gateway login invalidates the first, too.
++            try:
++                call(bus_name, OBJECT_PATH, INTERFACE, 'Cancel', '()', (), '()')
++            except Exception:
++                pass
++            return 1
++        if call('org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus',
++                'RequestName', '(su)', (bus_name, 4), '(u)')[0] != 1:
++            return 1
++        owned_name = bus_name
++        state = {'ready': False, 'recognized': False, 'cancelled': False, 'done': False}
++
++        def cancelled():
++            return state['cancelled'] or bool(claim and os.path.lexists(claim.with_suffix('.blocked')))
++
++        def method(_connection, sender, _path, _interface, name, parameters, invocation):
++            # Only the compositor that loaded this script can acknowledge or
++            # poll it. A later login helper may only invalidate the attempt.
++            if name != 'Cancel' and sender != kwin_owner:
++                invocation.return_dbus_error(INTERFACE + '.UnexpectedSender', 'Unexpected compositor')
++                return
++            if name == 'Poll':
++                def reply():
++                    phase = 'cancelled' if cancelled() else activation_phase(client, active, owner, uuid, path)
++                    invocation.return_value(GLib.Variant('(s)', (json.dumps({'phase': phase, 'close': close}),)))
++                    return GLib.SOURCE_REMOVE
++                GLib.timeout_add(250, reply)
++                return
++            if name == 'Ready':
++                state['ready'] = True
++            elif name == 'Observed':
++                state['recognized'] = parameters.unpack()[0]
++            elif name == 'Cancel':
++                state['cancelled'] = True
++            elif name == 'Finished':
++                outcome = parameters.unpack()[0]
++                messages = {'dry-run': 'gpclient-sso: would close tracked login window',
++                            'close-requested': 'gpclient-sso: requested login window closure'}
++                if outcome in messages:
++                    print(messages[outcome], file=common.sys.stderr)
++                state['done'] = True
++            invocation.return_value(GLib.Variant('()', ()))
++
++        info = Gio.DBusNodeInfo.new_for_xml(XML).interfaces[0]
++        registration = bus.register_object(OBJECT_PATH, info, method, None, None)
++        marker = common.secrets.token_hex(24)
++        script_name = 'gpclient-sso-' + marker
++        script_directory = tempfile.TemporaryDirectory(prefix='gpclient-sso-', dir=os.environ['XDG_RUNTIME_DIR'])
++        script = Path(script_directory.name) / 'login.js'
++        script.write_text(script_source(bus_name, marker))
++        script_id = call(kwin_owner, '/Scripting', 'org.kde.kwin.Scripting', 'loadScript',
++                         '(ss)', (str(script), script_name), '(i)')[0]
++        if script_id < 0:
++            return 1
++        # KWin 6 moved script objects; pin every call to the original bus owner.
++        for script_path in (f'/Scripting/Script{script_id}', f'/{script_id}'):
++            try:
++                call(kwin_owner, script_path, 'org.kde.kwin.Script', 'run', '()', (), '()')
++                break
++            except Exception:
++                continue
++        else:
++            return 1
++        context = GLib.MainContext.default()
++        deadline = time.monotonic() + 3
++        while not state['ready'] and time.monotonic() < deadline:
++            while context.pending():
++                context.iteration(False)
++            time.sleep(0.01)
++        if not state['ready'] or state['done'] or cancelled():
++            return 1
++        with common.LandingServer(marker, url, lambda: state['recognized']) as server:
++            server.timeout = 0.1
++            process = subprocess.Popen(common.landing_command(browser, url, f'http://{server.host}{server.path}', flags),
++                                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
++            launched = True
++            deadline = time.monotonic() + 300
++            while not state['done'] and time.monotonic() < deadline:
++                while context.pending():
++                    context.iteration(False)
++                if process.poll() not in (None, 0) and not server.landing_served:
++                    launched = False
++                    return 1
++                server.handle_request()
++        return 0
++    except Exception:
++        print('gpclient KWin tracking unavailable; manual window closing available', file=common.sys.stderr)
++        return 0 if launched else 1
++    finally:
++        if state is not None:
++            state['cancelled'] = True
++        if bus is not None:
++            if script_name and kwin_owner:
++                try:
++                    call(kwin_owner, '/Scripting', 'org.kde.kwin.Scripting', 'unloadScript',
++                         '(s)', (script_name,), '(b)')
++                except Exception:
++                    pass
++            if registration is not None:
++                bus.unregister_object(registration)
++            if owned_name:
++                try:
++                    call('org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus',
++                         'ReleaseName', '(s)', (owned_name,), '(u)')
++                except Exception:
++                    pass
++        if script_directory is not None:
++            script_directory.cleanup()
+diff --git a/scripts/kwin-sso.js b/scripts/kwin-sso.js
+new file mode 100644
+index 0000000..2cb3a78
+--- /dev/null
++++ b/scripts/kwin-sso.js
+@@ -0,0 +1,88 @@
++// Loaded for one activation by the session-user helper. Parameters are prepended
++// as JSON literals, never executable input. KWin 5 and 6 expose different names.
++(function () {
++    var existing = windows().slice();
++    var watched = [];
++    var target = null;
++    var ambiguous = false;
++    var stopped = false;
++    function windows() {
++        return typeof workspace.windowList === 'function' ? workspace.windowList() : workspace.clientList();
++    }
++    function request(method, args, callback) {
++        callDBus.apply(null, [ssoBus, '/org/gpclient/SsoWindow', 'org.gpclient.SsoWindow.Kwin', method]
++            .concat(args || []).concat(callback || function () {}));
++    }
++    function observe(window) {
++        if (String(window.caption || '').indexOf('GPSSO:' + ssoMarker) < 0)
++            return;
++        if (existing.indexOf(window) >= 0 || (target && target !== window))
++            ambiguous = true;
++        else
++            target = window;
++        request('Observed', [Boolean(target && !ambiguous)]);
++    }
++    function watch(window) {
++        if (watched.some(function (entry) { return entry[0] === window; }))
++            return;
++        if (watched.length >= 128) {
++            ambiguous = true;
++            request('Observed', [false]);
++            return;
++        }
++        var changed = function () { observe(window); };
++        window.captionChanged.connect(changed);
++        watched.push([window, changed]);
++        observe(window);
++    }
++    var added = workspace.windowAdded || workspace.clientAdded;
++    var removed = workspace.windowRemoved || workspace.clientRemoved;
++    function forget(window) {
++        if (target === window) {
++            ambiguous = true;
++            target = null;
++            request('Observed', [false]);
++        }
++        watched = watched.filter(function (entry) {
++            if (entry[0] !== window) return true;
++            entry[0].captionChanged.disconnect(entry[1]);
++            return false;
++        });
++    }
++    function stop(outcome) {
++        if (stopped) return;
++        stopped = true;
++        added.disconnect(watch);
++        removed.disconnect(forget);
++        watched.forEach(function (entry) { entry[0].captionChanged.disconnect(entry[1]); });
++        watched = [];
++        request('Finished', [outcome || 'manual']);
++    }
++    function poll() {
++        request('Poll', [], function (reply) {
++            if (stopped) return;
++            var state;
++            try { state = JSON.parse(reply); } catch (_) { stop(); return; }
++            if (!state || typeof state.phase !== 'string') { stop(); return; }
++            if (state.phase === 'pending') { poll(); return; }
++            var outcome = 'manual';
++            if (state.phase === 'connected') {
++                var current = windows();
++                current.forEach(observe);
++                if (target && !ambiguous && current.indexOf(target) >= 0) {
++                    if (state.close === true && target.closeable) {
++                        target.closeWindow();
++                        outcome = 'close-requested';
++                    } else if (state.close === false) {
++                        outcome = 'dry-run';
++                    }
++                }
++            }
++            stop(outcome);
++        });
++    }
++    existing.forEach(watch);
++    added.connect(watch);
++    removed.connect(forget);
++    request('Ready', [], poll);
++})();
+diff --git a/scripts/build-legacy-extension.py b/scripts/build-legacy-extension.py
+new file mode 100644
+index 0000000..39f8e43
+--- /dev/null
++++ b/scripts/build-legacy-extension.py
+@@ -0,0 +1,34 @@
++#!/usr/bin/env python3
++"""Convert the staged shared extension to GNOME 42-44's module entry point."""
++import json
++from pathlib import Path
++import re
++import sys
++
++
++def convert(directory):
++    root = Path(directory)
++    source = (root / 'extension.js').read_text()
++    if 'export default class SsoWindowExtension extends Extension' not in source:
++        raise ValueError('Expected the canonical modern extension entry point')
++    source = re.sub(r'^import .*;\n', '', source, flags=re.MULTILINE)
++    source = source.replace('export default class SsoWindowExtension', 'class SsoWindowExtension', 1)
++    prefix = '''const {Gio, GLib, NM} = imports.gi;
++const ExtensionUtils = imports.misc.extensionUtils;
++const Tracker = ExtensionUtils.getCurrentExtension().imports.tracker.Tracker;
++class Extension {
++    getSettings() { return ExtensionUtils.getSettings(); }
++}
++'''
++    tracker = (root / 'tracker.js').read_text()
++    if 'export class Tracker' not in tracker:
++        raise ValueError('Expected the shared tracker module')
++    metadata = json.loads((root / 'metadata.json').read_text())
++    metadata['shell-version'] = ['42', '43', '44']
++    (root / 'extension.js').write_text(prefix + source + '\nfunction init() { return new SsoWindowExtension(); }\n')
++    (root / 'tracker.js').write_text(tracker.replace('export class Tracker', 'var Tracker = class Tracker', 1))
++    (root / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
++
++
++if __name__ == '__main__':
++    convert(sys.argv[1])
+diff --git a/scripts/sso-window-helper.py b/scripts/sso-window-helper.py
+new file mode 100755
+index 0000000..d0a4e74
+--- /dev/null
++++ b/scripts/sso-window-helper.py
+@@ -0,0 +1,216 @@
++#!/usr/bin/env python3
++"""Optional session-user bridge. Failure before launch falls back to the wrapper."""
++
++import html
++import json
++import os
++import re
++import secrets
++import subprocess
++import sys
++import time
++from http.server import BaseHTTPRequestHandler, HTTPServer
++from urllib.parse import urlsplit
++from uuid import UUID
++
++BUS_NAME = "org.gpclient.SsoWindow"
++OBJECT_PATH = "/org/gpclient/SsoWindow"
++
++
++def validate_auth_url(url):
++    """Only gpauth's single-use IPv4 loopback URL, without query/credentials."""
++    parsed = urlsplit(url)
++    if (parsed.scheme != "http" or parsed.hostname != "127.0.0.1"
++            or parsed.username is not None or parsed.password is not None
++            or parsed.query or parsed.fragment or not parsed.port
++            or not re.fullmatch(r"/[0-9a-f-]{36}", parsed.path)):
++        raise ValueError("unsupported authentication URL")
++    UUID(parsed.path[1:])
++    return url
++
++
++def landing_page(marker, url, nonce):
++    # URL is validated before interpolation. The timer still redirects if the
++    # helper or extension disappears after the landing page has loaded.
++    return f'''<!doctype html><meta charset="utf-8">
++<title>GPSSO:{html.escape(marker)}</title>
++<p>Opening VPN sign-in...</p>
++<script nonce="{nonce}">
++const target = {json.dumps(url)};
++let done = false;
++function proceed() {{
++    if (done) return;
++    done = true;
++    location.replace(target);
++}}
++setTimeout(proceed, 5000);
++async function poll() {{
++    try {{
++        const result = await fetch(location.pathname + '/ready', {{cache: 'no-store'}});
++        if (result.ok && await result.text() === 'ready') proceed();
++    }} catch (_) {{}}
++    if (!done) setTimeout(poll, 200);
++}}
++poll();
++</script>'''.encode()
++
++
++class LandingServer(HTTPServer):
++    allow_reuse_address = False
++
++    def __init__(self, marker, url, recognized):
++        super().__init__(("127.0.0.1", 0), LandingHandler)
++        self.timeout = 0.5
++        self.landing_served = False
++        self.marker = marker
++        self.url = url
++        self.recognized = recognized
++        self.nonce = secrets.token_hex(16)
++        self.host = f"127.0.0.1:{self.server_port}"
++        self.path = "/" + secrets.token_hex(24)
++
++
++class LandingHandler(BaseHTTPRequestHandler):
++    def log_message(self, *_args):
++        pass
++
++    def do_GET(self):
++        self.connection.settimeout(1)
++        if self.headers.get("Host") != self.server.host:
++            self.send_error(403)
++            return
++        if self.path == self.server.path:
++            body = landing_page(self.server.marker, self.server.url, self.server.nonce)
++            content_type = "text/html; charset=utf-8"
++        elif self.path == self.server.path + "/ready":
++            body = b"ready" if self.server.recognized() else b"wait"
++            content_type = "text/plain"
++        else:
++            self.send_error(404)
++            return
++        self.send_response(200)
++        self.send_header("Content-Type", content_type)
++        self.send_header("Content-Length", str(len(body)))
++        self.send_header("Cache-Control", "no-store")
++        self.send_header("Referrer-Policy", "no-referrer")
++        self.send_header("X-Content-Type-Options", "nosniff")
++        self.send_header("Content-Security-Policy",
++                         f"default-src 'none'; script-src 'nonce-{self.server.nonce}'; connect-src 'self'; frame-ancestors 'none'")
++        self.end_headers()
++        self.wfile.write(body)
++        if self.path == self.server.path:
++            self.server.landing_served = True
++
++    def handle(self):
++        # Also bound clients that connect but never finish their request headers.
++        self.connection.settimeout(1)
++        super().handle()
++
++
++def landing_command(browser, original_url, landing_url, flags):
++    """Keep the wrapper's profile/presentation flags and replace one URL only."""
++    command = [browser]
++    replacements = 0
++    for flag in flags:
++        if flag == original_url:
++            command.append(landing_url)
++            replacements += 1
++        elif flag == "--app=" + original_url:
++            command.append("--app=" + landing_url)
++            replacements += 1
++        else:
++            command.append(flag)
++    if replacements != 1:
++        raise ValueError("missing or ambiguous browser URL")
++    return command
++
++
++def main():
++    launched = False
++    bus = None
++    owner = None
++    marker = secrets.token_hex(24)
++    try:
++        if os.geteuid() == 0 or len(sys.argv) < 4:
++            return 1
++        browser, url = sys.argv[1:3]
++        flags = sys.argv[3:]
++        validate_auth_url(url)
++        landing_command(browser, url, url, flags)
++        if "KDE" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper().split(":"):
++            import importlib.util
++            from pathlib import Path
++            spec = importlib.util.spec_from_file_location("kwin_sso", Path(__file__).with_name("kwin-sso-helper.py"))
++            module = importlib.util.module_from_spec(spec)
++            spec.loader.exec_module(module)
++            return module.main(sys.modules[__name__])
++        session = os.environ.get("WAYLAND_DISPLAY", "")
++        if not session and os.environ.get("XDG_SESSION_TYPE") == "x11":
++            session = os.environ.get("DISPLAY", "")
++        if not session:
++            return 1
++        connection_uuid = str(UUID(os.environ["GP_SSO_UUID"]))
++        path = os.environ["GP_SSO_ACTIVE_PATH"]
++        attempt = os.environ["GP_SSO_ATTEMPT"]
++        nm_owner = os.environ["GP_SSO_NM_OWNER"]
++        if not re.fullmatch(r":[0-9]+\.[0-9]+", nm_owner):
++            return 1
++        if not re.fullmatch(r"/org/freedesktop/NetworkManager/ActiveConnection/[0-9]+", path):
++            return 1
++        if not re.fullmatch(r"[0-9a-f]{32}", attempt):
++            return 1
++        # Optional dependency, imported only when correlation is available.
++        from gi.repository import Gio, GLib
++        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
++        owner = bus.call_sync(
++            "org.freedesktop.DBus", "/org/freedesktop/DBus",
++            "org.freedesktop.DBus", "GetNameOwner",
++            GLib.Variant("(s)", (BUS_NAME,)), GLib.VariantType.new("(s)"),
++            Gio.DBusCallFlags.NO_AUTO_START, 500, None).unpack()[0]
++
++        def call(method, signature, args, reply):
++            return bus.call_sync(
++                owner, OBJECT_PATH, BUS_NAME, method,
++                GLib.Variant(signature, args), GLib.VariantType.new(reply),
++                Gio.DBusCallFlags.NO_AUTO_START, 500, None).unpack()
++
++        if not call("Register", "(ssssss)", (connection_uuid, path, attempt, marker, session, nm_owner), "(b)")[0]:
++            return 1
++
++        def recognized():
++            try:
++                return call("Recognized", "(s)", (marker,), "(b)")[0]
++            except Exception:
++                return True  # Continue login; no replacement extension is used.
++
++        with LandingServer(marker, url, recognized) as server:
++            browser_process = subprocess.Popen(landing_command(browser, url, f"http://{server.host}{server.path}", flags),
++                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
++                             stderr=subprocess.DEVNULL)
++            launched = True
++            deadline = time.monotonic() + 20
++            while time.monotonic() < deadline:
++                status = browser_process.poll()
++                if status not in (None, 0) and not server.landing_served:
++                    # Startup failed before loading the marker. Let the wrapper
++                    # retry the original URL, and cancel this registration.
++                    launched = False
++                    return 1
++                server.handle_request()
++        return 0
++    except Exception:
++        # Never print exceptions containing authentication URLs or callback data.
++        print("gpclient SSO tracking unavailable; manual window closing available", file=sys.stderr)
++        return 0 if launched else 1
++    finally:
++        if not launched and bus is not None and owner is not None:
++            try:
++                bus.call_sync(owner, OBJECT_PATH, BUS_NAME, "Cancel",
++                              GLib.Variant("(s)", (marker,)), None,
++                              Gio.DBusCallFlags.NO_AUTO_START, 500, None)
++            except Exception:
++                pass
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/config/gpclient-callback.desktop b/config/gpclient-callback.desktop
+new file mode 100644
+index 0000000..a4c1aeb
+--- /dev/null
++++ b/config/gpclient-callback.desktop
+@@ -0,0 +1,6 @@
++[Desktop Entry]
++Name=GlobalProtect authentication callback
++Exec=/usr/bin/gpclient launch-gui %u
++Type=Application
++NoDisplay=true
++MimeType=x-scheme-handler/globalprotectcallback;
+diff --git a/extensions/gpclient-sso@globalprotect-saml-networkmanager/extension.js b/extensions/gpclient-sso@globalprotect-saml-networkmanager/extension.js
+new file mode 100644
+index 0000000..d9ae666
+--- /dev/null
++++ b/extensions/gpclient-sso@globalprotect-saml-networkmanager/extension.js
+@@ -0,0 +1,142 @@
++import Gio from 'gi://Gio';
++import GLib from 'gi://GLib';
++import NM from 'gi://NM';
++import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
++import {Tracker} from './tracker.js';
++
++const BUS_NAME = 'org.gpclient.SsoWindow';
++const PATH = '/org/gpclient/SsoWindow';
++const XML = `<node><interface name="${BUS_NAME}">
++<method name="Register">
++<arg type="s" direction="in"/><arg type="s" direction="in"/>
++<arg type="s" direction="in"/><arg type="s" direction="in"/>
++<arg type="s" direction="in"/><arg type="s" direction="in"/>
++<arg type="b" direction="out"/>
++</method>
++<method name="Recognized"><arg type="s" direction="in"/><arg type="b" direction="out"/></method>
++<method name="Cancel"><arg type="s" direction="in"/></method>
++</interface></node>`;
++
++export default class SsoWindowExtension extends Extension {
++    enable() {
++        this._tracker = new Tracker();
++        this._watched = new Map();
++        this._cancellable = new Gio.Cancellable();
++        const cancellable = this._cancellable;
++        // No synchronous system-bus calls in Shell's event loop.
++        NM.Client.new_async(cancellable, (_source, result) => {
++            if (cancellable.is_cancelled())
++                return;
++            try {
++                this._client = NM.Client.new_finish(result);
++            } catch (_) {
++                console.log('gpclient-sso: NetworkManager unavailable');
++            }
++        });
++        this._export = Gio.DBusExportedObject.wrapJSObject(XML, this);
++        this._export.export(Gio.DBus.session, PATH);
++        this._owner = Gio.bus_own_name_on_connection(
++            Gio.DBus.session, BUS_NAME, Gio.BusNameOwnerFlags.NONE, null, null);
++        this._created = global.display.connect('window-created', (_display, window) => {
++            if (this._tracker.attempts.size)
++                this._watch(window);
++        });
++        this._timer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 1, () => {
++            this._update();
++            return GLib.SOURCE_CONTINUE;
++        });
++    }
++
++    _windows() {
++        return global.display.list_all_windows();
++    }
++
++    _now() {
++        return GLib.get_monotonic_time() / 1000000;
++    }
++
++    Register(uuid, path, attempt, marker, session, nmOwner) {
++        // A per-user bus may be shared by more than one graphical session.
++        // Decline tracking if we cannot prove the browser targets this Shell.
++        const shellSession = GLib.getenv('WAYLAND_DISPLAY') || GLib.getenv('DISPLAY');
++        if (!shellSession || session !== shellSession ||
++            !this._client || this._client.get_dbus_name_owner() !== nmOwner)
++            return false;
++        const active = this._client?.get_active_connections().find(item => item.get_path() === path) ?? null;
++        const windows = this._windows();
++        const accepted = this._tracker.register(uuid, path, attempt, marker, active, windows, this._now());
++        if (accepted) {
++            // Snapshot the profile choice for this activation. An unreadable
++            // profile must not inherit a global opt-in and close a window.
++            const policy = active.get_connection()?.get_setting_vpn()?.get_data_item('close-browser');
++            this._tracker.attempts.get(marker).closeWindows = policy === 'true';
++            // Watch existing windows too: reuse must invalidate identification.
++            for (const window of windows)
++                this._watch(window);
++            console.log('gpclient-sso: registered activating VPN login');
++        }
++        return accepted;
++    }
++
++    Recognized(marker) {
++        return this._tracker.recognized(marker);
++    }
++
++    Cancel(marker) {
++        this._tracker.cancel(marker);
++    }
++
++    _watch(window) {
++        if (this._watched.has(window))
++            return;
++        if (this._watched.size >= 128) {
++            // Too many candidates: fail closed, never guess another target.
++            for (const entry of this._tracker.attempts.values())
++                entry.ambiguous = true;
++            return;
++        }
++        const title = window.connect('notify::title', () => this._tracker.observe(window));
++        const unmanaged = window.connect('unmanaged', () => {
++            this._tracker.forgetWindow(window);
++            this._unwatch(window);
++        });
++        this._watched.set(window, [title, unmanaged]);
++        this._tracker.observe(window);
++    }
++
++    _unwatch(window) {
++        for (const signal of this._watched.get(window) ?? [])
++            window.disconnect(signal);
++        this._watched.delete(window);
++    }
++
++    _update() {
++        const active = this._client?.nm_running ? this._client.get_active_connections() : [];
++        this._tracker.update(active, this._windows(), this._now(), (window, entry) => {
++            if (entry.closeWindows) {
++                if (window.can_close())
++                    window.delete(global.get_current_time());
++            } else {
++                console.log('gpclient-sso: would close tracked login window');
++            }
++        });
++        if (!this._tracker.attempts.size) {
++            for (const window of this._watched.keys())
++                this._unwatch(window);
++        }
++    }
++
++    disable() {
++        this._cancellable.cancel();
++        GLib.Source.remove(this._timer);
++        global.display.disconnect(this._created);
++        for (const window of this._watched.keys())
++            this._unwatch(window);
++        this._export.unexport();
++        Gio.bus_unown_name(this._owner);
++        this._tracker = null;
++        this._client = null;
++        this._export = null;
++        this._cancellable = null;
++    }
++}
+diff --git a/extensions/gpclient-sso@globalprotect-saml-networkmanager/metadata.json b/extensions/gpclient-sso@globalprotect-saml-networkmanager/metadata.json
+new file mode 100644
+index 0000000..aae910a
+--- /dev/null
++++ b/extensions/gpclient-sso@globalprotect-saml-networkmanager/metadata.json
+@@ -0,0 +1,16 @@
++{
++  "uuid": "gpclient-sso@globalprotect-saml-networkmanager",
++  "name": "GlobalProtect SSO Window",
++  "description": "Track dedicated VPN login windows on GNOME. Closing is opt-in.",
++  "shell-version": [
++    "45",
++    "46",
++    "47",
++    "48",
++    "49",
++    "50",
++    "51"
++  ],
++  "settings-schema": "org.gnome.shell.extensions.gpclient-sso",
++  "version": 1
++}
+diff --git a/extensions/gpclient-sso@globalprotect-saml-networkmanager/schemas/org.gnome.shell.extensions.gpclient-sso.gschema.xml b/extensions/gpclient-sso@globalprotect-saml-networkmanager/schemas/org.gnome.shell.extensions.gpclient-sso.gschema.xml
+new file mode 100644
+index 0000000..d588149
+--- /dev/null
++++ b/extensions/gpclient-sso@globalprotect-saml-networkmanager/schemas/org.gnome.shell.extensions.gpclient-sso.gschema.xml
+@@ -0,0 +1,9 @@
++<schemalist>
++  <schema id="org.gnome.shell.extensions.gpclient-sso" path="/org/gnome/shell/extensions/gpclient-sso/">
++    <key name="close-windows" type="b">
++      <default>false</default>
++      <summary>Deprecated global closing preference</summary>
++      <description>Deprecated: configure close-browser in the VPN profile using its connection editor. This global preference is no longer used.</description>
++    </key>
++  </schema>
++</schemalist>
+diff --git a/extensions/gpclient-sso@globalprotect-saml-networkmanager/tracker.js b/extensions/gpclient-sso@globalprotect-saml-networkmanager/tracker.js
+new file mode 100644
+index 0000000..dd82244
+--- /dev/null
++++ b/extensions/gpclient-sso@globalprotect-saml-networkmanager/tracker.js
+@@ -0,0 +1,98 @@
++// Independent of Shell imports so the safety rules can be tested with GJS.
++export class Tracker {
++    constructor() {
++        this.attempts = new Map();
++        this.blockedPaths = new Set();
++    }
++
++    register(uuid, path, attempt, marker, active, existing, now) {
++        if (!/^[0-9a-f-]{36}$/.test(uuid) || !/^[0-9a-f]{32}$/.test(attempt) ||
++            !/^[0-9a-f]{48}$/.test(marker) || this.attempts.has(marker) ||
++            this.attempts.size >= 16 || this.blockedPaths.has(path) ||
++            !this.matches(active, uuid, path) || active.get_state() !== 1)
++            return false;
++        // Portal and gateway windows: decline closing for the entire activation.
++        for (const entry of this.attempts.values()) {
++            if (entry.path === path) {
++                entry.ambiguous = true;
++                this.blockedPaths.add(path);
++                return false;
++            }
++        }
++        this.attempts.set(marker, {
++            uuid, path, attempt, marker, active, existing: new Set(existing),
++            window: null, ambiguous: false, expires: now + 300,
++        });
++        return true;
++    }
++
++    matches(active, uuid, path) {
++        return active !== null && active.get_uuid() === uuid &&
++            active.get_path() === path && active.get_vpn();
++    }
++
++    observe(window) {
++        const title = window.get_title() ?? '';
++        for (const entry of this.attempts.values()) {
++            if (!title.includes(`GPSSO:${entry.marker}`))
++                continue;
++            if (entry.existing.has(window)) {
++                entry.ambiguous = true;
++            } else if (entry.window && entry.window !== window) {
++                entry.ambiguous = true;
++            } else {
++                entry.window = window;
++            }
++        }
++    }
++
++    recognized(marker) {
++        const entry = this.attempts.get(marker);
++        return Boolean(entry?.window && !entry.ambiguous);
++    }
++
++    cancel(marker) {
++        const entry = this.attempts.get(marker);
++        if (entry) {
++            this.blockedPaths.add(entry.path);
++            this.attempts.delete(marker);
++        }
++    }
++
++    forgetWindow(window) {
++        for (const [marker, entry] of this.attempts) {
++            if (entry.window === window) {
++                this.blockedPaths.add(entry.path);
++                this.attempts.delete(marker);
++            }
++        }
++    }
++
++    update(activeConnections, windows, now, completed) {
++        const paths = new Set(activeConnections.map(active => active.get_path()));
++        for (const path of this.blockedPaths) {
++            if (!paths.has(path))
++                this.blockedPaths.delete(path);
++        }
++        for (const [marker, entry] of this.attempts) {
++            // Identity as well as path: a daemon restart invalidates the object.
++            const active = activeConnections.find(item => item === entry.active);
++            if (now >= entry.expires || !active ||
++                !this.matches(active, entry.uuid, entry.path) || ![1, 2].includes(active.get_state())) {
++                this.attempts.delete(marker);
++                continue;
++            }
++            if (active.get_state() !== 2)
++                continue;
++            // Take a final snapshot to catch a second matching window before close.
++            if (entry.window) {
++                for (const window of windows)
++                    this.observe(window);
++            }
++            this.attempts.delete(marker);
++            this.blockedPaths.add(entry.path);
++            if (entry.window && !entry.ambiguous && windows.includes(entry.window))
++                completed(entry.window, entry);
++        }
++    }
++}

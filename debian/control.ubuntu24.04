@@ -32,6 +32,8 @@ Depends: ${shlibs:Depends},
          ${misc:Depends},
          network-manager,
          python3,
+         python3-gi,
+         gir1.2-nm-1.0,
          python3-sdbus,
          openconnect
 Conflicts: globalprotect-openconnect

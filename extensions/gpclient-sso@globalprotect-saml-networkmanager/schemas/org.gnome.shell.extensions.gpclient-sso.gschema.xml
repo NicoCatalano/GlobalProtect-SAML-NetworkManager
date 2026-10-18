@@ -1,0 +1,9 @@
+<schemalist>
+  <schema id="org.gnome.shell.extensions.gpclient-sso" path="/org/gnome/shell/extensions/gpclient-sso/">
+    <key name="close-windows" type="b">
+      <default>false</default>
+      <summary>Deprecated global closing preference</summary>
+      <description>Deprecated: configure close-browser in the VPN profile using its connection editor. This global preference is no longer used.</description>
+    </key>
+  </schema>
+</schemalist>

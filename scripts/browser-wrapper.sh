@@ -7,12 +7,10 @@
 # has no usable DISPLAY/WAYLAND_DISPLAY/XDG_RUNTIME_DIR/DBUS_SESSION_BUS_ADDRESS
 # and silently fails to open a window (issue #7). This wrapper reconstructs the
 # session environment, works around NetworkManager's ProtectHome=read-only
-# sandbox, and closes the browser once the authentication is done.
+# sandbox, and optionally registers a dedicated SSO window with GNOME Shell.
 #
 # Which browser to launch comes from $GP_BROWSER (set by nm-gpclient-service);
-# without it we autodetect. $GP_AUTH_TIMEOUT overrides the 300 s safety timeout.
-
-MAX_WAIT="${GP_AUTH_TIMEOUT:-300}"
+# without it we autodetect. Browser lifetime is controlled only by GNOME Shell.
 
 # LOG_FILE is set after REAL_UID is known (security: per-user log file). Until
 # then log() must go to stderr, so an inherited LOG_FILE cannot receive messages
@@ -32,11 +30,11 @@ log() {
 # contain dots, '@' or upper case, so we never parse one; only a number ends up
 # in commands. The name below is only looked up from the UID, for logging.
 if [ "$EUID" -eq 0 ]; then
-    # gpapi's real_user_lookup checks SUDO_UID, PKEXEC_UID, DOAS_USER; the wrapper
-    # also falls back to SUDO_USER/USER for older callers (nm-gpclient-service
-    # passes the desktop user in SUDO_UID). A variable that is set wins even when
-    # its value is invalid, so a bad SUDO_UID is never papered over by a later one.
-    # Nothing found means uid 0: the common root check below refuses it.
+    # Only numeric UIDs are accepted. Never turn a user name inherited from the
+    # environment into a UID: it would make an untrusted name reach a command.
+    # A variable that is set wins even when its value is invalid, so a bad
+    # SUDO_UID is never papered over by PKEXEC_UID. Nothing found means uid 0:
+    # the common root check below refuses it.
     REAL_UID=0
     UID_SOURCE=none
     if [ -n "${SUDO_UID+set}" ]; then
@@ -45,20 +43,6 @@ if [ "$EUID" -eq 0 ]; then
     elif [ -n "${PKEXEC_UID+set}" ]; then
         REAL_UID="$PKEXEC_UID"
         UID_SOURCE=PKEXEC_UID
-    else
-        for NAME_VAR in DOAS_USER SUDO_USER USER; do
-            LOOKUP_NAME="${!NAME_VAR:-}"
-            # Blank names carry no information; USER=root is just where we run
-            [[ "$LOOKUP_NAME" =~ ^[[:space:]]*$ ]] && continue
-            [ "$NAME_VAR" = USER ] && [ "$LOOKUP_NAME" = root ] && continue
-            REAL_UID=$(id -u -- "$LOOKUP_NAME" 2>/dev/null)
-            if [ -z "$REAL_UID" ]; then
-                log "ERROR: Cannot get UID for user: $LOOKUP_NAME ($NAME_VAR)"
-                exit 1
-            fi
-            UID_SOURCE="id -u -- $LOOKUP_NAME"
-            break
-        done
     fi
 else
     # We cannot switch user anyway, so SUDO_UID/SUDO_USER/USER from the
@@ -119,8 +103,8 @@ fi
 # Per-user log file (security: prevent symlink attack). The name is kept from
 # the old edge-only wrapper so existing troubleshooting docs stay valid.
 LOG_FILE="/tmp/edge-wrapper-$REAL_UID.log"
-log "called with args: $*"
-log "EUID=$EUID USER=${USER:-} SUDO_UID=${SUDO_UID:-} SUDO_USER=${SUDO_USER:-} PKEXEC_UID=${PKEXEC_UID:-} DOAS_USER=${DOAS_USER:-} GP_BROWSER=${GP_BROWSER:-unset} GP_AUTH_TIMEOUT=$MAX_WAIT"
+log "called for browser authentication"
+log "EUID=$EUID USER=${USER:-} SUDO_UID=${SUDO_UID:-} SUDO_USER=${SUDO_USER:-} PKEXEC_UID=${PKEXEC_UID:-} DOAS_USER=${DOAS_USER:-} GP_BROWSER=${GP_BROWSER:-unset}"
 log "resolved real user: $REAL_USER (uid=$REAL_UID) home=$REAL_HOME"
 
 # --- Pick the browser binary ------------------------------------------------
@@ -160,14 +144,6 @@ if [ -z "$BROWSER_BIN" ]; then
     log "ERROR: no usable browser found (GP_BROWSER=${GP_BROWSER:-unset})"
     exit 1
 fi
-
-case "$(basename "$BROWSER_BIN")" in
-    microsoft-edge*)                     FAMILY=edge ;;
-    google-chrome*|chrome|chromium*)     FAMILY=chromium ;;
-    firefox*)                            FAMILY=firefox ;;
-    *)                                   FAMILY=other ;;
-esac
-log "browser: $BROWSER_BIN (family=$FAMILY)"
 
 # --- Reconstruct the user's session environment -----------------------------
 
@@ -248,6 +224,60 @@ for var in XDG_CURRENT_DESKTOP KDE_FULL_SESSION KDE_SESSION_VERSION; do
     fi
     [ -n "$value" ] && DESKTOP_ENV+=("$var=$value")
 done
+
+# Resolve the desktop default in the desktop user's context, never as root.
+# xdg-open may reuse a tab, which cannot safely be closed by the window tracker.
+# Accept only plain known-browser desktop commands; retain xdg-open for custom
+# launchers/options rather than discard a configured profile or execute a shell.
+query_default_browser() {
+    local config_home data_home data_dirs
+    config_home=$(session_env_var XDG_CONFIG_HOME)
+    data_home=$(session_env_var XDG_DATA_HOME)
+    data_dirs=$(session_env_var XDG_DATA_DIRS)
+    local lookup_env=(
+        "HOME=$REAL_HOME"
+        "XDG_CONFIG_HOME=${config_home:-$REAL_HOME/.config}"
+        "XDG_DATA_HOME=${data_home:-$REAL_HOME/.local/share}"
+        "XDG_DATA_DIRS=${data_dirs:-${XDG_DATA_DIRS:-/usr/local/share:/usr/share}}"
+        "XDG_RUNTIME_DIR=/run/user/$REAL_UID"
+        "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$REAL_UID/bus"
+        "${DESKTOP_ENV[@]}"
+    )
+    local drop_user=()
+    [ "$EUID" -eq 0 ] && drop_user=(sudo -u "#$REAL_UID")
+    "${drop_user[@]}" env "${lookup_env[@]}" python3 -c '
+import os
+import shlex
+import shutil
+from gi.repository import Gio
+app = Gio.AppInfo.get_default_for_uri_scheme("http")
+args = shlex.split(app.get_commandline() or "") if app else []
+known = {"firefox", "firefox-esr", "firefox-developer-edition", "firefox-nightly",
+         "chromium", "chromium-browser", "google-chrome", "google-chrome-stable",
+         "google-chrome-beta", "google-chrome-unstable", "microsoft-edge",
+         "microsoft-edge-stable", "microsoft-edge-beta", "microsoft-edge-dev"}
+if (args and os.path.basename(args[0]) in known
+        and args[1:] in (["%u"], ["%U"])):
+    binary = shutil.which(args[0])
+    if binary:
+        print(binary)
+' 2>/dev/null
+}
+
+if [[ "${GP_BROWSER:-}" = default || "${GP_BROWSER:-}" = xdg-open ]]; then
+    DEFAULT_BROWSER_BIN=$(query_default_browser)
+    if [ -n "$DEFAULT_BROWSER_BIN" ] && [ -x "$DEFAULT_BROWSER_BIN" ]; then
+        BROWSER_BIN="$DEFAULT_BROWSER_BIN"
+    fi
+fi
+
+case "$(basename "$BROWSER_BIN")" in
+    microsoft-edge*)                     FAMILY=edge ;;
+    google-chrome*|chrome|chromium*)     FAMILY=chromium ;;
+    firefox*)                            FAMILY=firefox ;;
+    *)                                   FAMILY=other ;;
+esac
+log "browser: $BROWSER_BIN (family=$FAMILY)"
 
 # --- Profile / HOME workaround for ProtectHome=read-only --------------------
 
@@ -331,17 +361,14 @@ BROWSER_FLAGS=()
 case "$FAMILY" in
     edge|chromium)
         write_chromium_policy
+        PROFILE_FLAGS=()
         if [ "$HOME_IS_RO" -eq 1 ]; then
             PROFILE_DIR="$ALT_PROFILE_DIR"
             mkdir -p "$PROFILE_DIR/Crash Reports" "$EFFECTIVE_HOME/.config/Crash Reports" 2>/dev/null
-        else
-            # Reuse the user's real profile so existing SSO cookies apply
-            case "$(basename "$BROWSER_BIN")" in
-                microsoft-edge*) PROFILE_DIR="$REAL_HOME/.config/microsoft-edge" ;;
-                chromium*)       PROFILE_DIR="$REAL_HOME/.config/chromium" ;;
-                *)               PROFILE_DIR="$REAL_HOME/.config/google-chrome" ;;
-            esac
+            PROFILE_FLAGS=("--user-data-dir=$PROFILE_DIR")
         fi
+        # With a writable home let the browser select its normal profile,
+        # including its release channel and most recently selected profile.
         BROWSER_FLAGS=(
             "--no-first-run"
             "--no-default-browser-check"
@@ -355,7 +382,7 @@ case "$FAMILY" in
             "--disable-features=msEdgeSyncService,TranslateUI,EdgeCollections,msEdgeSweeperMode,ExternalProtocolDialog"
             "--app=$URL"
             "--window-size=896,964"
-            "--user-data-dir=$PROFILE_DIR"
+            "${PROFILE_FLAGS[@]}"
         )
         if [ "$SESSION_TYPE" = "wayland" ]; then
             BROWSER_FLAGS=("--ozone-platform=wayland" "--enable-features=UseOzonePlatform" "${BROWSER_FLAGS[@]}")
@@ -374,68 +401,27 @@ case "$FAMILY" in
         ;;
 esac
 
-# --- gpauth is the authoritative "authentication finished" signal -----------
-#
-# gpauth exits as soon as it receives the callback data, so its death means the
-# user is done. It cannot be found via $PPID: open::with_detached() double-forks
-# and calls setsid(), so this wrapper's parent is init, not gpauth.
-GPAUTH_PID=$(pgrep -n -x -u "$REAL_UID" gpauth 2>/dev/null | head -1)
-if [ -n "$GPAUTH_PID" ]; then
-    log "tracking gpauth PID $GPAUTH_PID"
-else
-    log "WARNING: no gpauth process found - the browser will not be closed automatically"
-fi
+log "launching authentication browser (URL omitted)"
 
-log "env: ${ENV_VARS[*]}"
-log "cmd: $BROWSER_BIN ${BROWSER_FLAGS[*]}"
+# Pass correlation explicitly through sudo, whose default environment is reset.
+ENV_VARS+=("GP_SSO_UUID=${GP_SSO_UUID:-}")
+ENV_VARS+=("GP_SSO_ACTIVE_PATH=${GP_SSO_ACTIVE_PATH:-}")
+ENV_VARS+=("GP_SSO_ATTEMPT=${GP_SSO_ATTEMPT:-}")
+ENV_VARS+=("GP_SSO_NM_OWNER=${GP_SSO_NM_OWNER:-}")
+SSO_HELPER=/usr/libexec/gpclient/sso-window-helper
 
-run_browser_with_monitor() {
+launch_browser() {
+    # Keep each browser's existing launch flags, including app mode and profile.
+    # Reused windows/tabs are rejected by the extension's pre-launch snapshot.
+    if [ "$HOME_IS_RO" -eq 0 ] && [ -x "$SSO_HELPER" ]; then
+        if env "${ENV_VARS[@]}" "$SSO_HELPER" "$BROWSER_BIN" "$URL" "${BROWSER_FLAGS[@]}" 2>>"$LOG_FILE"; then
+            return 0
+        fi
+        log "SSO window tracking unavailable; opening browser normally"
+    fi
     env "${ENV_VARS[@]}" "$BROWSER_BIN" "${BROWSER_FLAGS[@]}" 2>>"$LOG_FILE" &
     BROWSER_PID=$!
-    log "started browser with PID=$BROWSER_PID"
-
-    # Give the process a moment to fail loudly (bad flags, no display)
-    sleep 1
-
-    if [ -z "$GPAUTH_PID" ]; then
-        wait "$BROWSER_PID" 2>/dev/null
-        log "done: browser exited (no gpauth to watch, nothing was killed)"
-        return 0
-    fi
-
-    # Stay alive for as long as gpauth does: that is how long the
-    # authentication window can appear, so it is also how long the window rule
-    # has to stay loaded - even when the process we started handed the URL to an
-    # already running browser and exited straight away.
-    local elapsed=0 handed_over=0
-    while kill -0 "$GPAUTH_PID" 2>/dev/null; do
-        if [ "$handed_over" -eq 0 ] && ! kill -0 "$BROWSER_PID" 2>/dev/null; then
-            handed_over=1
-            log "the browser we started exited - the URL went to a running instance"
-        fi
-
-        if [ "$elapsed" -ge "$MAX_WAIT" ]; then
-            log "done: timeout after ${MAX_WAIT}s with gpauth still running"
-            if [ "$handed_over" -eq 0 ]; then
-                log "killing the browser we started"
-                kill -9 "$BROWSER_PID" 2>/dev/null
-                wait "$BROWSER_PID" 2>/dev/null
-            fi
-            return 1
-        fi
-
-        sleep 2
-        elapsed=$((elapsed + 2))
-    done
-
-    if [ "$handed_over" -eq 1 ]; then
-        log "done: gpauth ($GPAUTH_PID) exited - authentication finished (window belongs to a running browser, not closing it)"
-        return 0
-    fi
-
-    log "done: gpauth ($GPAUTH_PID) exited - authentication finished, closing browser"
-    sleep 2
-    kill "$BROWSER_PID" 2>/dev/null
+    log "started browser with PID=$BROWSER_PID; manual closing available"
     wait "$BROWSER_PID" 2>/dev/null
     return 0
 }
@@ -443,11 +429,11 @@ run_browser_with_monitor() {
 if [ "$EUID" -eq 0 ]; then
     # "#uid" makes sudo take a numeric UID, so the name is never involved
     log "running as root; dropping privileges to $REAL_USER (uid=$REAL_UID) via sudo"
-    exec sudo -u "#$REAL_UID" bash -c "$(declare -f log run_browser_with_monitor); \
+    exec sudo -u "#$REAL_UID" bash -c "$(declare -f log launch_browser); \
 ENV_VARS=(${ENV_VARS[*]@Q}); BROWSER_BIN=${BROWSER_BIN@Q}; \
 BROWSER_FLAGS=(${BROWSER_FLAGS[*]@Q}); LOG_FILE=${LOG_FILE@Q}; \
-GPAUTH_PID=${GPAUTH_PID@Q}; MAX_WAIT=${MAX_WAIT@Q}; run_browser_with_monitor"
+HOME_IS_RO=${HOME_IS_RO@Q}; SSO_HELPER=${SSO_HELPER@Q}; URL=${URL@Q}; launch_browser"
 else
     log "running as EUID=$EUID (no privilege drop needed)"
-    run_browser_with_monitor
+    launch_browser
 fi

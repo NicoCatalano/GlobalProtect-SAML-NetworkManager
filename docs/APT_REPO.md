@@ -1,18 +1,18 @@
-# APT repository (GitHub Pages)
+# APT repository publishing (GitHub Pages)
 
-Packages are published as a signed apt repository at
-<https://wmp.github.io/GlobalProtect-SAML-NetworkManager/>, so installing and
-updating works like with any PPA - and `apt` resolves the dependency between the
-core service and the GUI packages, which downloading individual `.deb` files
-never could ([#5](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/issues/5)).
+**Fork status, 2026-10-18:** GitHub Pages is configured, but the public signing-key
+URL returns HTTP 404. The signed APT repository is not published yet. Use source
+builds or PR test packages from this fork's [releases](https://github.com/NicoCatalano/GlobalProtect-SAML-NetworkManager/releases).
+Do not add the repository below until a signed release and its indexes have been
+published and verified. These are the intended installation and maintenance steps.
 
-## For users
+## Installation after publication
 
 ```bash
-curl -fsSL https://wmp.github.io/GlobalProtect-SAML-NetworkManager/gpclient-archive-keyring.gpg \
+curl -fsSL https://nicocatalano.github.io/GlobalProtect-SAML-NetworkManager/gpclient-archive-keyring.gpg \
   | sudo tee /usr/share/keyrings/gpclient-archive-keyring.gpg > /dev/null
 
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gpclient-archive-keyring.gpg] https://wmp.github.io/GlobalProtect-SAML-NetworkManager $(lsb_release -cs) main" \
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gpclient-archive-keyring.gpg] https://nicocatalano.github.io/GlobalProtect-SAML-NetworkManager $(lsb_release -cs) main" \
   | sudo tee /etc/apt/sources.list.d/gpclient.list
 
 sudo apt update
@@ -30,7 +30,7 @@ Same thing in deb822 format, if you prefer `/etc/apt/sources.list.d/*.sources`:
 
 ```
 Types: deb
-URIs: https://wmp.github.io/GlobalProtect-SAML-NetworkManager
+URIs: https://nicocatalano.github.io/GlobalProtect-SAML-NetworkManager
 Suites: noble
 Components: main
 Architectures: amd64
@@ -41,7 +41,7 @@ Use the value of `dpkg --print-architecture` (`arm64` on ARM); without the line 
 also asks for foreign-architecture indexes such as `i386`, which the repository
 does not publish.
 
-Supported suites are Ubuntu release codenames: `jammy` (22.04), `noble` (24.04),
+The publishing configuration targets Ubuntu release codenames: `jammy` (22.04), `noble` (24.04),
 `resolute` (26.04). Both `amd64` and `arm64` are built; apt picks the one matching
 your system.
 
@@ -55,6 +55,11 @@ sudo apt update
 ```
 
 ## For the maintainer
+
+Creating the fork does not publish packages or copy upstream signing secrets.
+Configure a dedicated signing key, publish a tagged release, and verify the key,
+`InRelease` files and package indexes before advertising APT installation.
+This PR does not create a release or deploy an APT repository.
 
 ### Cutting a release
 
@@ -139,7 +144,7 @@ Rotating it:
 
 ```bash
 gpg --batch --passphrase '' --pinentry-mode loopback \
-    --quick-generate-key 'WMP GlobalProtect apt repository <wmp@users.noreply.github.com>' \
+    --quick-generate-key 'NicoCatalano GlobalProtect apt repository <NicoCatalano@users.noreply.github.com>' \
     rsa4096 sign never
 FPR=$(gpg --batch --with-colons --list-secret-keys --list-options show-only-fpr-mbox \
     | head -1 | awk '{print $1}')
@@ -158,19 +163,19 @@ Pages is served from the GitHub Actions deployment (Settings → Pages → Sourc
 GitHub Actions), configured once with:
 
 ```bash
-gh api -X POST repos/WMP/GlobalProtect-SAML-NetworkManager/pages -f build_type=workflow
+gh api -X POST repos/NicoCatalano/GlobalProtect-SAML-NetworkManager/pages -f build_type=workflow
 ```
 
 A public repository means a public site - which is what an apt repository is
 anyway.
 
-### Not implemented
+### PR test packages
 
 There is no testing channel for prereleases in the apt repository. Test builds of
 pull requests are published as the prerelease `pr-<N>` (removed when the PR
 closes) by `.github/workflows/pr-test-packages.yml`, which adds a `Test packages`
 check to the PR with the install command
-(`bash <(curl -fsSL https://raw.githubusercontent.com/WMP/GlobalProtect-SAML-NetworkManager/main/scripts/install-pr-build.sh) <N>`).
+(`bash <(curl -fsSL https://raw.githubusercontent.com/NicoCatalano/GlobalProtect-SAML-NetworkManager/main/scripts/install-pr-build.sh) <N> --repo NicoCatalano/GlobalProtect-SAML-NetworkManager`).
 `publish-apt.yml` skips prereleases, so these packages never reach the repository.
 Their version carries the PR and run number after the codename
 (`1.4.2-1~noble1+pr24.57`), which sorts above the release's `1.4.2-1~noble1`, so

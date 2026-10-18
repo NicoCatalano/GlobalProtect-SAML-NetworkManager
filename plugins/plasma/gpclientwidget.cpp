@@ -57,6 +57,7 @@ GpclientWidget::GpclientWidget(const NetworkManager::VpnSetting::Ptr &setting, Q
     connect(m_ui->usernameLineEdit, &QLineEdit::textChanged, this, &GpclientWidget::settingChanged);
     connect(m_ui->browserComboBox, &QComboBox::currentTextChanged, this, &GpclientWidget::settingChanged);
     connect(m_ui->dnsLineEdit, &QLineEdit::textChanged, this, &GpclientWidget::settingChanged);
+    connect(m_ui->closeBrowserCheckBox, &QCheckBox::toggled, this, &GpclientWidget::settingChanged);
     connect(m_ui->hipCheckBox, &QCheckBox::toggled, this, &GpclientWidget::settingChanged);
     connect(m_ui->fixOpensslComboBox, &QComboBox::currentTextChanged, this, &GpclientWidget::settingChanged);
 
@@ -153,6 +154,7 @@ void GpclientWidget::loadConfig(const NetworkManager::Setting::Ptr &setting)
         }
 
         // Load HIP (default: enabled)
+        m_ui->closeBrowserCheckBox->setChecked(data.value(QLatin1String("close-browser")) == QLatin1String("true"));
         const QString hipValue = data.value(QLatin1String("hip"), QLatin1String("true"));
         m_ui->hipCheckBox->setChecked(hipValue.toLower() == QLatin1String("true"));
     }
@@ -232,6 +234,9 @@ QVariantMap GpclientWidget::setting() const
         data.remove(QLatin1String("fix-openssl"));
         break;
     }
+
+    data.insert(QLatin1String("close-browser"),
+                m_ui->closeBrowserCheckBox->isChecked() ? QLatin1String("true") : QLatin1String("false"));
 
     // Save HIP
     data.insert(QLatin1String("hip"),
