@@ -30,11 +30,11 @@ log() {
 # contain dots, '@' or upper case, so we never parse one; only a number ends up
 # in commands. The name below is only looked up from the UID, for logging.
 if [ "$EUID" -eq 0 ]; then
-    # gpapi's real_user_lookup checks SUDO_UID, PKEXEC_UID, DOAS_USER; the wrapper
-    # also falls back to SUDO_USER/USER for older callers (nm-gpclient-service
-    # passes the desktop user in SUDO_UID). A variable that is set wins even when
-    # its value is invalid, so a bad SUDO_UID is never papered over by a later one.
-    # Nothing found means uid 0: the common root check below refuses it.
+    # Only numeric UIDs are accepted. Never turn a user name inherited from the
+    # environment into a UID: it would make an untrusted name reach a command.
+    # A variable that is set wins even when its value is invalid, so a bad
+    # SUDO_UID is never papered over by PKEXEC_UID. Nothing found means uid 0:
+    # the common root check below refuses it.
     REAL_UID=0
     UID_SOURCE=none
     if [ -n "${SUDO_UID+set}" ]; then
@@ -43,20 +43,6 @@ if [ "$EUID" -eq 0 ]; then
     elif [ -n "${PKEXEC_UID+set}" ]; then
         REAL_UID="$PKEXEC_UID"
         UID_SOURCE=PKEXEC_UID
-    else
-        for NAME_VAR in DOAS_USER SUDO_USER USER; do
-            LOOKUP_NAME="${!NAME_VAR:-}"
-            # Blank names carry no information; USER=root is just where we run
-            [[ "$LOOKUP_NAME" =~ ^[[:space:]]*$ ]] && continue
-            [ "$NAME_VAR" = USER ] && [ "$LOOKUP_NAME" = root ] && continue
-            REAL_UID=$(id -u -- "$LOOKUP_NAME" 2>/dev/null)
-            if [ -z "$REAL_UID" ]; then
-                log "ERROR: Cannot get UID for user: $LOOKUP_NAME ($NAME_VAR)"
-                exit 1
-            fi
-            UID_SOURCE="id -u -- $LOOKUP_NAME"
-            break
-        done
     fi
 else
     # We cannot switch user anyway, so SUDO_UID/SUDO_USER/USER from the
