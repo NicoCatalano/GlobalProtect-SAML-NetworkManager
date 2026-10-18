@@ -794,3 +794,78 @@ def test_sso_bridge_preserves_browser_launch(tmp_path, monkeypatch, browser, app
     assert (tmp_path / "opened").exists() == (helper_status != 0)
     if helper_status:
         assert (tmp_path / "opened").read_text().strip() == " ".join(flags)
+
+
+@pytest.mark.parametrize("selection", ["default", "xdg-open"])
+@pytest.mark.parametrize("command, expected", [
+    ("firefox %u", "firefox"),
+    ("chromium %U", "chromium"),
+    ("firefox --profile private %u", None),
+    ("env firefox %u", None),
+    ("custom-browser %u", None),
+    ("missing-firefox %u", None),
+    ("/no/such/firefox %u", None),
+    ('firefox "', None),
+    ("firefox %u; touch pwned", None),
+    (None, None),
+])
+def test_default_browser_dedicated_window(tmp_path, monkeypatch, command, expected, selection):
+    """Known plain desktop launchers get window flags; custom launchers stay intact."""
+    import sys
+    from pathlib import Path
+
+    _fake_root_tools(tmp_path)
+    (tmp_path / "home").mkdir()
+    _script(tmp_path / "id", f"echo {FAKE_UID}\n")
+    _script(tmp_path / "pgrep", "exit 1\n")
+    for browser in ("firefox", "chromium", "xdg-open"):
+        shutil.copyfile(tmp_path / "browser", tmp_path / browser)
+        (tmp_path / browser).chmod(0o755)
+    # Fake only Gio's desktop lookup. Run the wrapper's actual Python parsing,
+    # validation and executable lookup, without reading real user associations.
+    helper = tmp_path / "helper"
+    _script(helper,
+            f'printf "%s\\0" "$@" > {shlex.quote(str(tmp_path / "helper_args"))}\n'
+            "exit 1\n")
+    wrapper = tmp_path / "wrapper.sh"
+    wrapper.write_text(Path(WRAPPER).read_text().replace(
+        "SSO_HELPER=/usr/libexec/gpclient/sso-window-helper",
+        "SSO_HELPER=" + shlex.quote(str(helper))))
+    monkeypatch.setitem(globals(), "WRAPPER", str(wrapper))
+    fake_modules = tmp_path / "modules"
+    (fake_modules / "gi" / "repository").mkdir(parents=True)
+    (fake_modules / "gi" / "__init__.py").write_text("")
+    (fake_modules / "gi" / "repository" / "__init__.py").write_text(
+        "class Info:\n"
+        f"    def get_commandline(self): return {command!r}\n"
+        "class Gio:\n"
+        "    class AppInfo:\n"
+        "        @staticmethod\n"
+        "        def get_default_for_uri_scheme(scheme):\n"
+        "            assert scheme == 'http'\n"
+        "            return Info()\n"
+    )
+    _script(tmp_path / "python3",
+            f'printf "%s\\n" "$HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" '
+            f'> {shlex.quote(str(tmp_path / "lookup_env"))}\n'
+            f'export PYTHONPATH={shlex.quote(str(fake_modules))}\n'
+            f'exec {shlex.quote(sys.executable)} "$@"\n')
+    result = _run_wrapper(_root_env(tmp_path, SUDO_UID=str(FAKE_UID),
+                                    GP_BROWSER=selection))
+    assert result.returncode == 0, result.stderr
+    args = (tmp_path / "helper_args").read_bytes().decode().rstrip("\0").split("\0")
+    assert args[:2] == [str(tmp_path / (expected or "xdg-open")), URL]
+    flags = (tmp_path / "opened").read_text().strip().split()
+    assert args[2:] == flags
+    if expected == "firefox":
+        assert flags == ["--new-window", URL]
+    elif expected == "chromium":
+        assert "--app=" + URL in flags
+        assert URL not in flags
+    else:
+        assert flags == [URL]
+    assert (tmp_path / "lookup_env").read_text().splitlines() == [
+        str(tmp_path / "home"), str(tmp_path / "home" / ".config"),
+        str(tmp_path / "home" / ".local" / "share"),
+    ]
+    assert not (tmp_path / "pwned").exists()

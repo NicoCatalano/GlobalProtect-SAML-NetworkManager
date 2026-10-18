@@ -1,6 +1,6 @@
 pkgname=networkmanager-gpclient-git
 pkgver=pr.32.r0.g8758f6a
-pkgrel=7
+pkgrel=8
 pkgdesc='GlobalProtect SAML/SSO VPN plugin for NetworkManager'
 arch=('x86_64')
 url='https://github.com/NicoCatalano/GlobalProtect-SAML-NetworkManager'

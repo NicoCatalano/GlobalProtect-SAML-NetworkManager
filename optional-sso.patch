@@ -281,7 +281,7 @@ index 42ba373..28a42d8 100644
   </widget>
   <resources/>
 diff --git a/scripts/browser-wrapper.sh b/scripts/browser-wrapper.sh
-index b5019c1..3f22541 100644
+index b5019c1..cf4ca1d 100644
 --- a/scripts/browser-wrapper.sh
 +++ b/scripts/browser-wrapper.sh
 @@ -7,12 +7,10 @@
@@ -310,7 +310,83 @@ index b5019c1..3f22541 100644
  log "resolved real user: $REAL_USER (uid=$REAL_UID) home=$REAL_HOME"
  
  # --- Pick the browser binary ------------------------------------------------
-@@ -331,17 +329,14 @@ BROWSER_FLAGS=()
+@@ -161,14 +159,6 @@ if [ -z "$BROWSER_BIN" ]; then
+     exit 1
+ fi
+ 
+-case "$(basename "$BROWSER_BIN")" in
+-    microsoft-edge*)                     FAMILY=edge ;;
+-    google-chrome*|chrome|chromium*)     FAMILY=chromium ;;
+-    firefox*)                            FAMILY=firefox ;;
+-    *)                                   FAMILY=other ;;
+-esac
+-log "browser: $BROWSER_BIN (family=$FAMILY)"
+-
+ # --- Reconstruct the user's session environment -----------------------------
+ 
+ # Detect Wayland socket (fallback to wayland-0)
+@@ -249,6 +239,60 @@ for var in XDG_CURRENT_DESKTOP KDE_FULL_SESSION KDE_SESSION_VERSION; do
+     [ -n "$value" ] && DESKTOP_ENV+=("$var=$value")
+ done
+ 
++# Resolve the desktop default in the desktop user's context, never as root.
++# xdg-open may reuse a tab, which cannot safely be closed by the window tracker.
++# Accept only plain known-browser desktop commands; retain xdg-open for custom
++# launchers/options rather than discard a configured profile or execute a shell.
++query_default_browser() {
++    local config_home data_home data_dirs
++    config_home=$(session_env_var XDG_CONFIG_HOME)
++    data_home=$(session_env_var XDG_DATA_HOME)
++    data_dirs=$(session_env_var XDG_DATA_DIRS)
++    local lookup_env=(
++        "HOME=$REAL_HOME"
++        "XDG_CONFIG_HOME=${config_home:-$REAL_HOME/.config}"
++        "XDG_DATA_HOME=${data_home:-$REAL_HOME/.local/share}"
++        "XDG_DATA_DIRS=${data_dirs:-${XDG_DATA_DIRS:-/usr/local/share:/usr/share}}"
++        "XDG_RUNTIME_DIR=/run/user/$REAL_UID"
++        "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$REAL_UID/bus"
++        "${DESKTOP_ENV[@]}"
++    )
++    local drop_user=()
++    [ "$EUID" -eq 0 ] && drop_user=(sudo -u "#$REAL_UID")
++    "${drop_user[@]}" env "${lookup_env[@]}" python3 -c '
++import os
++import shlex
++import shutil
++from gi.repository import Gio
++app = Gio.AppInfo.get_default_for_uri_scheme("http")
++args = shlex.split(app.get_commandline() or "") if app else []
++known = {"firefox", "firefox-esr", "firefox-developer-edition", "firefox-nightly",
++         "chromium", "chromium-browser", "google-chrome", "google-chrome-stable",
++         "google-chrome-beta", "google-chrome-unstable", "microsoft-edge",
++         "microsoft-edge-stable", "microsoft-edge-beta", "microsoft-edge-dev"}
++if (args and os.path.basename(args[0]) in known
++        and args[1:] in (["%u"], ["%U"])):
++    binary = shutil.which(args[0])
++    if binary:
++        print(binary)
++' 2>/dev/null
++}
++
++if [[ "${GP_BROWSER:-}" = default || "${GP_BROWSER:-}" = xdg-open ]]; then
++    DEFAULT_BROWSER_BIN=$(query_default_browser)
++    if [ -n "$DEFAULT_BROWSER_BIN" ] && [ -x "$DEFAULT_BROWSER_BIN" ]; then
++        BROWSER_BIN="$DEFAULT_BROWSER_BIN"
++    fi
++fi
++
++case "$(basename "$BROWSER_BIN")" in
++    microsoft-edge*)                     FAMILY=edge ;;
++    google-chrome*|chrome|chromium*)     FAMILY=chromium ;;
++    firefox*)                            FAMILY=firefox ;;
++    *)                                   FAMILY=other ;;
++esac
++log "browser: $BROWSER_BIN (family=$FAMILY)"
++
+ # --- Profile / HOME workaround for ProtectHome=read-only --------------------
+ 
+ TEMP_BASE="/tmp/edge-wrapper-$REAL_UID"
+@@ -331,17 +375,14 @@ BROWSER_FLAGS=()
  case "$FAMILY" in
      edge|chromium)
          write_chromium_policy
@@ -332,7 +408,7 @@ index b5019c1..3f22541 100644
          BROWSER_FLAGS=(
              "--no-first-run"
              "--no-default-browser-check"
-@@ -355,7 +350,7 @@ case "$FAMILY" in
+@@ -355,7 +396,7 @@ case "$FAMILY" in
              "--disable-features=msEdgeSyncService,TranslateUI,EdgeCollections,msEdgeSweeperMode,ExternalProtocolDialog"
              "--app=$URL"
              "--window-size=896,964"
@@ -341,7 +417,7 @@ index b5019c1..3f22541 100644
          )
          if [ "$SESSION_TYPE" = "wayland" ]; then
              BROWSER_FLAGS=("--ozone-platform=wayland" "--enable-features=UseOzonePlatform" "${BROWSER_FLAGS[@]}")
-@@ -374,68 +369,27 @@ case "$FAMILY" in
+@@ -374,68 +415,27 @@ case "$FAMILY" in
          ;;
  esac
  
@@ -359,8 +435,7 @@ index b5019c1..3f22541 100644
 -
 -log "env: ${ENV_VARS[*]}"
 -log "cmd: $BROWSER_BIN ${BROWSER_FLAGS[*]}"
-+log "launching authentication browser (URL omitted)"
- 
+-
 -run_browser_with_monitor() {
 -    env "${ENV_VARS[@]}" "$BROWSER_BIN" "${BROWSER_FLAGS[@]}" 2>>"$LOG_FILE" &
 -    BROWSER_PID=$!
@@ -374,12 +449,7 @@ index b5019c1..3f22541 100644
 -        log "done: browser exited (no gpauth to watch, nothing was killed)"
 -        return 0
 -    fi
-+# Pass correlation explicitly through sudo, whose default environment is reset.
-+ENV_VARS+=("GP_SSO_UUID=${GP_SSO_UUID:-}")
-+ENV_VARS+=("GP_SSO_ACTIVE_PATH=${GP_SSO_ACTIVE_PATH:-}")
-+ENV_VARS+=("GP_SSO_ATTEMPT=${GP_SSO_ATTEMPT:-}")
-+ENV_VARS+=("GP_SSO_NM_OWNER=${GP_SSO_NM_OWNER:-}")
-+SSO_HELPER=/usr/libexec/gpclient/sso-window-helper
++log "launching authentication browser (URL omitted)"
  
 -    # Stay alive for as long as gpauth does: that is how long the
 -    # authentication window can appear, so it is also how long the window rule
@@ -391,7 +461,13 @@ index b5019c1..3f22541 100644
 -            handed_over=1
 -            log "the browser we started exited - the URL went to a running instance"
 -        fi
--
++# Pass correlation explicitly through sudo, whose default environment is reset.
++ENV_VARS+=("GP_SSO_UUID=${GP_SSO_UUID:-}")
++ENV_VARS+=("GP_SSO_ACTIVE_PATH=${GP_SSO_ACTIVE_PATH:-}")
++ENV_VARS+=("GP_SSO_ATTEMPT=${GP_SSO_ATTEMPT:-}")
++ENV_VARS+=("GP_SSO_NM_OWNER=${GP_SSO_NM_OWNER:-}")
++SSO_HELPER=/usr/libexec/gpclient/sso-window-helper
+ 
 -        if [ "$elapsed" -ge "$MAX_WAIT" ]; then
 -            log "done: timeout after ${MAX_WAIT}s with gpauth still running"
 -            if [ "$handed_over" -eq 0 ]; then
@@ -427,7 +503,7 @@ index b5019c1..3f22541 100644
      wait "$BROWSER_PID" 2>/dev/null
      return 0
  }
-@@ -443,11 +397,11 @@ run_browser_with_monitor() {
+@@ -443,11 +443,11 @@ run_browser_with_monitor() {
  if [ "$EUID" -eq 0 ]; then
      # "#uid" makes sudo take a numeric UID, so the name is never involved
      log "running as root; dropping privileges to $REAL_USER (uid=$REAL_UID) via sudo"

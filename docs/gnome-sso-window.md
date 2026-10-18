@@ -78,12 +78,20 @@ nmcli connection modify "My VPN" +vpn.data "close-browser=false"
 nmcli connection modify "My VPN" +vpn.data "close-browser=true"
 ```
 
-Replace `My VPN` with the actual connection name. Repeat with Firefox and Chromium:
+Replace `My VPN` with the actual connection name. Repeat with Firefox, Chromium
+and the desktop default:
 
 ```bash
 nmcli connection modify "My VPN" +vpn.data "browser=firefox"
 nmcli connection modify "My VPN" +vpn.data "browser=chromium"
+nmcli connection modify "My VPN" +vpn.data "browser=default"
 ```
+
+With **Browser: default**, a standard Firefox or Chromium-family desktop launcher
+is resolved as the desktop user and receives the same dedicated-window flags as
+an explicit browser selection. Custom launchers, extra desktop-entry options and
+unavailable Python/GI use `xdg-open`; an existing window or tab is left open for
+manual closing.
 
 The previous global `gsettings ... close-windows` value no longer controls closing.
 Select the checkbox after upgrading if you want to keep automatic closing enabled.

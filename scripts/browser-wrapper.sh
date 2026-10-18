@@ -159,14 +159,6 @@ if [ -z "$BROWSER_BIN" ]; then
     exit 1
 fi
 
-case "$(basename "$BROWSER_BIN")" in
-    microsoft-edge*)                     FAMILY=edge ;;
-    google-chrome*|chrome|chromium*)     FAMILY=chromium ;;
-    firefox*)                            FAMILY=firefox ;;
-    *)                                   FAMILY=other ;;
-esac
-log "browser: $BROWSER_BIN (family=$FAMILY)"
-
 # --- Reconstruct the user's session environment -----------------------------
 
 # Detect Wayland socket (fallback to wayland-0)
@@ -246,6 +238,60 @@ for var in XDG_CURRENT_DESKTOP KDE_FULL_SESSION KDE_SESSION_VERSION; do
     fi
     [ -n "$value" ] && DESKTOP_ENV+=("$var=$value")
 done
+
+# Resolve the desktop default in the desktop user's context, never as root.
+# xdg-open may reuse a tab, which cannot safely be closed by the window tracker.
+# Accept only plain known-browser desktop commands; retain xdg-open for custom
+# launchers/options rather than discard a configured profile or execute a shell.
+query_default_browser() {
+    local config_home data_home data_dirs
+    config_home=$(session_env_var XDG_CONFIG_HOME)
+    data_home=$(session_env_var XDG_DATA_HOME)
+    data_dirs=$(session_env_var XDG_DATA_DIRS)
+    local lookup_env=(
+        "HOME=$REAL_HOME"
+        "XDG_CONFIG_HOME=${config_home:-$REAL_HOME/.config}"
+        "XDG_DATA_HOME=${data_home:-$REAL_HOME/.local/share}"
+        "XDG_DATA_DIRS=${data_dirs:-${XDG_DATA_DIRS:-/usr/local/share:/usr/share}}"
+        "XDG_RUNTIME_DIR=/run/user/$REAL_UID"
+        "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$REAL_UID/bus"
+        "${DESKTOP_ENV[@]}"
+    )
+    local drop_user=()
+    [ "$EUID" -eq 0 ] && drop_user=(sudo -u "#$REAL_UID")
+    "${drop_user[@]}" env "${lookup_env[@]}" python3 -c '
+import os
+import shlex
+import shutil
+from gi.repository import Gio
+app = Gio.AppInfo.get_default_for_uri_scheme("http")
+args = shlex.split(app.get_commandline() or "") if app else []
+known = {"firefox", "firefox-esr", "firefox-developer-edition", "firefox-nightly",
+         "chromium", "chromium-browser", "google-chrome", "google-chrome-stable",
+         "google-chrome-beta", "google-chrome-unstable", "microsoft-edge",
+         "microsoft-edge-stable", "microsoft-edge-beta", "microsoft-edge-dev"}
+if (args and os.path.basename(args[0]) in known
+        and args[1:] in (["%u"], ["%U"])):
+    binary = shutil.which(args[0])
+    if binary:
+        print(binary)
+' 2>/dev/null
+}
+
+if [[ "${GP_BROWSER:-}" = default || "${GP_BROWSER:-}" = xdg-open ]]; then
+    DEFAULT_BROWSER_BIN=$(query_default_browser)
+    if [ -n "$DEFAULT_BROWSER_BIN" ] && [ -x "$DEFAULT_BROWSER_BIN" ]; then
+        BROWSER_BIN="$DEFAULT_BROWSER_BIN"
+    fi
+fi
+
+case "$(basename "$BROWSER_BIN")" in
+    microsoft-edge*)                     FAMILY=edge ;;
+    google-chrome*|chrome|chromium*)     FAMILY=chromium ;;
+    firefox*)                            FAMILY=firefox ;;
+    *)                                   FAMILY=other ;;
+esac
+log "browser: $BROWSER_BIN (family=$FAMILY)"
 
 # --- Profile / HOME workaround for ProtectHome=read-only --------------------
 
