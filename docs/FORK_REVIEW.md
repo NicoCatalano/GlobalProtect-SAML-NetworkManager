@@ -132,3 +132,16 @@ test both successful and failed builds. The multi-release script is unchanged.
 
 The full root/non-root unit suites and current-head CI are recorded in the PR.
 The installed package, running VPN and desktop extension were not changed.
+
+### PR self-review passes
+
+1. Reviewed the incoming PR diff against `origin/main` (`8758f6a`), including
+   runtime code, tests, both package paths and docs. Fixed stale patch exports,
+   misleading APT installation claims and outdated Ubuntu validation in `39eef8e`.
+2. Re-reviewed the complete diff at `39eef8e`. Cross-checking all Ubuntu control
+   files found an incorrect new documentation claim about the 22.04 dependency:
+   that control file uses `python3-pip`, not `python3-sdbus`. Corrected the build
+   guide to describe the separate system-Python module setup and removed the
+   inaccurate README prerequisite. No runtime changes were needed.
+
+The final pass and current-head test results are recorded in PR #1.

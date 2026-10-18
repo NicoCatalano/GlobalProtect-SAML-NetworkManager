@@ -35,8 +35,7 @@ sudo apt install ./network-manager-gpclient_*.deb ./network-manager-gpclient-gno
 
 For KDE, replace the GNOME package with `network-manager-gpclient-plasma`.
 The fork's APT repository is **not published yet**; its setup is documented
-[separately](docs/APT_REPO.md). Ubuntu 22.04 needs a separately packaged `python3-sdbus` dependency;
-see the [build guide](docs/BUILD.md#ubuntu-2204).
+[separately](docs/APT_REPO.md).
 
 **Build from source:** use a full recursive checkout, then choose your platform:
 

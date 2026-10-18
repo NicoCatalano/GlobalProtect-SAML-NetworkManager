@@ -87,12 +87,12 @@ you built on a different Ubuntu version. Local `.deb` files do not belong in Git
 
 ### Ubuntu 22.04
 
-`python3-sdbus` is not provided by the Ubuntu 22.04 archive. The existing package
-requires it; installing a Python module alone does not satisfy an APT package
-dependency. This guide does not provide a 22.04 dependency package.
-This does not enable the GNOME companion on
-GNOME 42. For new companion testing use Ubuntu 24.04 or newer with a supported
-GNOME Wayland session.
+`python3-sdbus` is not provided by the Ubuntu 22.04 archive. Its control file
+uses `python3-pip` instead; the `sdbus` Python module must be available to the
+system Python running the service. The 22.04 Docker build image installs that
+module with pip, but the resulting `.deb` does not bundle it for the host.
+This module setup does not enable the companion on GNOME 42. For new companion
+testing use Ubuntu 24.04 or newer with a supported GNOME Wayland session.
 
 ## Docker Ubuntu build
 
