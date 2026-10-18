@@ -24,8 +24,8 @@ It is a local build workflow, not an AUR release.
 
 Packaging configurations exist for Ubuntu 22.04, 24.04, 24.10 and 26.04, for
 `amd64` and `arm64`. This lists build targets, not a promise that every Ubuntu
-release remains maintained. The GNOME companion needs GNOME 45-51 on Wayland;
-Ubuntu 22.04's standard desktop can use the VPN but cannot run the companion.
+release remains maintained. GNOME companions cover 42-51, including Ubuntu 22.04. A KWin adapter provides
+automatic closing on Plasma 5/6. Both use the per-profile closing preference.
 Live SSO testing on Ubuntu currently covers 26.04 with Firefox and Chromium.
 
 Select your host's control file, then install the declared build dependencies:
@@ -91,8 +91,9 @@ you built on a different Ubuntu version. Local `.deb` files do not belong in Git
 uses `python3-pip` instead; the `sdbus` Python module must be available to the
 system Python running the service. The 22.04 Docker build image installs that
 module with pip, but the resulting `.deb` does not bundle it for the host.
-This module setup does not enable the companion on GNOME 42. For new companion
-testing use Ubuntu 24.04 or newer with a supported GNOME Wayland session.
+The GNOME package automatically selects the legacy 42-44 extension entry point
+when built on Ubuntu 22.04. Other distributions with GNOME 42-44 can stage the
+legacy extension using `make SSO_GNOME_LEGACY=1 DESTDIR=/tmp/sso-stage install-sso-extension`.
 
 ## Docker Ubuntu build
 
@@ -138,6 +139,7 @@ python3 -m pytest tests/unit -q
 sudo python3 -m pytest tests/unit -q -p no:cacheprovider
 gjs -m tests/unit/sso_tracker.mjs
 gjs -m tests/unit/sso_extension.mjs
+gjs -m tests/unit/kwin_sso.mjs
 ```
 
 Run Python tests as both a regular user and root; each run exercises different
@@ -159,3 +161,20 @@ make gpauth
 For Plasma, use `plugins/plasma/build.sh`, with Qt/KF development dependencies
 matching the desired major version. Prefer package installation for desktop tests
 so systemd units, the service, plugins and helpers stay in sync.
+
+### Editor preference checks
+
+`tests/test_editor_preferences.c` compiles against each actual GTK editor. It
+checks missing/invalid defaults, loading true/false, saving both choices and the
+scrollable layout. CI runs it under Xvfb:
+
+```bash
+gcc -Wall tests/test_editor_preferences.c -o /tmp/editor-gtk3-test $(pkg-config --cflags --libs gtk+-3.0 libnm)
+gcc -Wall -DTEST_GTK4 tests/test_editor_preferences.c -o /tmp/editor-gtk4-test $(pkg-config --cflags --libs gtk4 libnm)
+GDK_BACKEND=x11 xvfb-run -a /tmp/editor-gtk3-test
+GDK_BACKEND=x11 xvfb-run -a /tmp/editor-gtk4-test
+```
+
+Live closing tests are still required on GNOME 42 and Plasma 5/6, including
+both X11 and Wayland sessions where available. A successful package build or
+fake-window test does not establish those results.

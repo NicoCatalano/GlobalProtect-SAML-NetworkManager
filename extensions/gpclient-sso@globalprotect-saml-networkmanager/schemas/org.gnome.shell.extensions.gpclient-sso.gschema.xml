@@ -2,8 +2,8 @@
   <schema id="org.gnome.shell.extensions.gpclient-sso" path="/org/gnome/shell/extensions/gpclient-sso/">
     <key name="close-windows" type="b">
       <default>false</default>
-      <summary>Close identified login windows after VPN activation</summary>
-      <description>Leave disabled until dry-run identification has been verified. Closing affects the entire window, including any tabs added by the user.</description>
+      <summary>Deprecated global closing preference</summary>
+      <description>Deprecated: configure close-browser in the VPN profile using its connection editor. This global preference is no longer used.</description>
     </key>
   </schema>
 </schemalist>

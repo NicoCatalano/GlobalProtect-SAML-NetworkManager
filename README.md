@@ -5,19 +5,19 @@ browser for SAML/SSO and two-factor authentication. Standard password and OTP
 logins are supported too.
 
 This fork adds optional **automatic closing of the dedicated SSO login window**
-after the VPN connects, with Ubuntu and Arch packaging. On GNOME Wayland it
-keeps your existing browser session and leaves your other windows open.
+after the VPN connects, with Ubuntu and Arch packaging. GNOME and KDE Plasma
+adapters keep your existing browser session and leave your other windows open.
 Firefox uses a normal dedicated window; Chromium-family browsers use app mode.
 
 ## Screenshots
 
+<img width="700" alt="VPN configuration with the per-connection login-window closing checkbox" src="docs/images/vpn-editor-gtk4.png" />
+
+<details>
+<summary>Desktop integration screenshots</summary>
 <p>
 <img width="380" alt="VPN configuration screenshot 1" src="https://github.com/user-attachments/assets/adb4a229-ae91-4415-8450-4b106ebeb475" />
 <img width="380" alt="VPN configuration screenshot 2" src="https://github.com/user-attachments/assets/7613a682-068c-4992-92d7-80139969c351" />
-</p>
-<details>
-<summary>More screenshots</summary>
-<p>
 <img width="300" alt="VPN configuration screenshot 3" src="https://github.com/user-attachments/assets/db5196a5-942e-4692-856b-e87fa647b2c7" />
 <img width="300" alt="VPN configuration screenshot 4" src="https://github.com/user-attachments/assets/29c54314-33f3-4b07-9378-a8e4c462409c" />
 </p>
@@ -63,14 +63,20 @@ git switch codex/gnome-sso-window
 
 ## Optional SSO window closing
 
-The companion requires **GNOME Shell 45-51 on Wayland** and starts with closing
-disabled. Ubuntu's GNOME package and the Arch package include it.
-Log out and back in after installation, then follow the
-[enable and test instructions](docs/gnome-sso-window.md#enable-and-test).
+Open the VPN configuration, tick **Close login window after VPN connects**, and
+save. Leave it unchecked to keep the window open. The choice is stored per VPN
+connection; no `gsettings` command is needed. The configuration form is wider,
+with scrolling in the GTK editors so its fields remain reachable.
 
-Live testing covers Arch GNOME 51.1 with Firefox and Ubuntu 26.04 GNOME Wayland
-with Firefox and Chromium. Other allowed GNOME versions still need live testing.
-The core VPN and desktop editors can be used without the companion.
+Adapters are provided for **GNOME 42-51** (including Ubuntu 22.04) and **KDE
+Plasma 5/6**, on X11 and Wayland. GNOME needs its installed extension enabled;
+KDE loads the packaged KWin script for each login. Follow the
+[setup and test guide](docs/gnome-sso-window.md).
+
+Live tests so far cover the earlier GNOME Wayland implementation on Arch 51.1
+with Firefox and Ubuntu 26.04 with Firefox and Chromium. The new checkbox,
+GNOME 42 and KDE adapters have automated coverage; live desktop verification is
+still required. Ordinary VPN login remains available if tracking is unavailable.
 
 ## Technical documentation
 

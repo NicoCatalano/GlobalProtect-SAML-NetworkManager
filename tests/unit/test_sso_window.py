@@ -119,7 +119,8 @@ def test_service_bus_failure_is_optional(service_module, monkeypatch):
     ("microsoft-edge", ["--app=" + AUTH_URL]),
     ("other-browser", [AUTH_URL]),
 ])
-def test_helper_fallback(monkeypatch, mode, expected, launched, browser, flags):
+@pytest.mark.parametrize("session_type", ["wayland", "x11"])
+def test_helper_fallback(monkeypatch, mode, expected, launched, browser, flags, session_type):
     import sys
     calls = []
     opened = []
@@ -130,6 +131,10 @@ def test_helper_fallback(monkeypatch, mode, expected, launched, browser, flags):
     monkeypatch.setenv("GP_SSO_ATTEMPT", "b" * 32)
     monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-test")
     monkeypatch.setenv("GP_SSO_NM_OWNER", ":1.42")
+    if session_type == "x11":
+        monkeypatch.delenv("WAYLAND_DISPLAY")
+        monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+        monkeypatch.setenv("DISPLAY", ":9")
     if mode == "missing-correlation":
         monkeypatch.delenv("GP_SSO_UUID")
 
@@ -201,3 +206,30 @@ def test_landing_command_keeps_profile_and_literal_arguments():
     assert command == ["/path with spaces/chromium", flags[0], flags[1],
                        "--app=http://127.0.0.1:12345/random", flags[3]]
     assert flags[2] == "--app=" + AUTH_URL
+
+
+@pytest.mark.parametrize('desktop, broken, expected', [
+    ('KDE', False, 0), ('GNOME', False, 1), ('KDE', True, 1),
+])
+def test_desktop_adapter_dispatch(monkeypatch, desktop, broken, expected):
+    import importlib.util
+    import sys
+    calls = []
+    monkeypatch.setattr(helper.os, 'geteuid', lambda: 1000)
+    monkeypatch.setattr(sys, 'argv', ['helper', '/usr/bin/firefox', AUTH_URL, AUTH_URL])
+    monkeypatch.setenv('XDG_CURRENT_DESKTOP', desktop)
+    monkeypatch.delenv('WAYLAND_DISPLAY', raising=False)
+    monkeypatch.delenv('XDG_SESSION_TYPE', raising=False)
+    monkeypatch.setitem(sys.modules, helper.__name__, helper)
+    def load(module):
+        if broken:
+            raise FileNotFoundError('optional adapter absent')
+    def run(common):
+        assert common is helper
+        calls.append('kwin')
+        return 0
+    monkeypatch.setattr(importlib.util, 'spec_from_file_location', lambda *_: SimpleNamespace(
+        loader=SimpleNamespace(exec_module=load)))
+    monkeypatch.setattr(importlib.util, 'module_from_spec', lambda _: SimpleNamespace(main=run))
+    assert helper.main() == expected
+    assert calls == (['kwin'] if desktop == 'KDE' and not broken else [])

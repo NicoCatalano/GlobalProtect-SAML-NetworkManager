@@ -137,7 +137,16 @@ def main():
         flags = sys.argv[3:]
         validate_auth_url(url)
         landing_command(browser, url, url, flags)
+        if "KDE" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper().split(":"):
+            import importlib.util
+            from pathlib import Path
+            spec = importlib.util.spec_from_file_location("kwin_sso", Path(__file__).with_name("kwin-sso-helper.py"))
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module.main(sys.modules[__name__])
         session = os.environ.get("WAYLAND_DISPLAY", "")
+        if not session and os.environ.get("XDG_SESSION_TYPE") == "x11":
+            session = os.environ.get("DISPLAY", "")
         if not session:
             return 1
         connection_uuid = str(UUID(os.environ["GP_SSO_UUID"]))

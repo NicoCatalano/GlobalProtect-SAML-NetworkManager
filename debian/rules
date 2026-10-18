@@ -120,6 +120,10 @@ ifneq ($(HAS_CORE),)
 		$(CURDIR)/debian/network-manager-gpclient/usr/lib/NetworkManager/nm-gpclient-systemd-activate
 	install -D -m 755 scripts/sso-window-helper.py \
 		$(CURDIR)/debian/network-manager-gpclient/usr/libexec/gpclient/sso-window-helper
+	install -D -m 644 scripts/kwin-sso-helper.py \
+		$(CURDIR)/debian/network-manager-gpclient/usr/libexec/gpclient/kwin-sso-helper.py
+	install -D -m 644 scripts/kwin-sso.js \
+		$(CURDIR)/debian/network-manager-gpclient/usr/libexec/gpclient/kwin-sso.js
 	install -D -m 755 scripts/browser-wrapper.sh \
 		$(CURDIR)/debian/network-manager-gpclient/usr/libexec/gpclient/browser-wrapper
 	install -D -m 755 scripts/edge-wrapper.sh \

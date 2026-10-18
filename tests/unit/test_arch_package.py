@@ -10,10 +10,14 @@ checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
 
 
-@pytest.mark.parametrize("state", ["valid", "wrong-version", "stale-wrapper", "missing-schema"])
+@pytest.mark.parametrize("state", ["valid", "wrong-version", "stale-wrapper", "stale-editor", "missing-schema"])
 def test_package_matches_checkout(monkeypatch, state):
     contents = {installed: (ROOT / source).read_bytes() for source, installed in checker.FILES.items()}
     contents[".PKGINFO"] = b"pkgname = networkmanager-gpclient-git\npkgver = test-4\n"
+    for name in ("libnm-vpn-plugin-gpclient-editor.so", "libnm-gtk4-vpn-plugin-gpclient-editor.so"):
+        contents["usr/lib/NetworkManager/" + name] = b"ELF Close login window after VPN connects"
+    if state == "stale-editor":
+        contents["usr/lib/NetworkManager/libnm-vpn-plugin-gpclient-editor.so"] = b"old editor"
     schema = f"usr/share/gnome-shell/extensions/{checker.EXTENSION}/schemas/gschemas.compiled"
     contents[schema] = b"compiled schema"
     if state == "wrong-version":

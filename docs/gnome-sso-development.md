@@ -1,159 +1,88 @@
-# GNOME SSO implementation and verification notes
+# SSO window tracking design
 
-The companion extension defaults to **dry run**. It logs `would close tracked
-login window` after the exact VPN activation succeeds and leaves the window open.
-The installed VPN and systemd activation are not changed by editing this checkout.
-No live authentication, installation or GNOME enablement is performed by the tests.
+## Shared activation identity
 
-## Behavior
+Before starting authentication the root VPN service snapshots exactly one
+activating NetworkManager VPN by UUID, active object path and unique D-Bus owner.
+It generates an attempt nonce. The wrapper passes these values explicitly through
+the numeric-UID privilege drop; the browser and adapters never run as root.
+The upstream submodule is unchanged. Its AuthLauncher inherits these values at
+version 2.6.5 (`9e4f459`). Ambiguous or unavailable identity leaves ordinary login
+and manual closing available.
 
-The service snapshots the unique activating VPN object with the profile UUID
-before spawning gpclient. It also pins NetworkManager's unique D-Bus owner, so
-a daemon restart before registration cannot reuse a stale object path. It
-exports the owner, UUID, object path and a random attempt
-identifier. At submodule version 2.6.5 (`9e4f459`), AuthLauncher uses inherited
-Command environment and `into_non_root` overrides session/user keys without
-clearing other keys. The detached browser wrapper inherits them too. Missing
-values cause an ordinary browser launch. No upstream code is modified.
+The session-user bridge accepts only gpauth's single-use IPv4 loopback UUID URL,
+without credentials, query or fragment. It substitutes one URL argument in the
+existing browser command, preserving profile/presentation flags. A temporary local
+page exposes a random marker in its title; only a new window displaying that
+marker is a candidate. The page redirects after recognition or a five-second
+fallback, with no-referrer, no-store and restrictive CSP headers. URLs and callback
+data are not logged.
 
-For browsers routed through `browser-wrapper` with a writable normal home,
-the session-user helper registers a
-fresh marker on the session bus, then launches a loopback landing page using the
-wrapper's existing browser arguments. Firefox uses `--new-window`; Chrome,
-Chromium and Edge use `--app` for a minimal window. Profile and presentation
-arguments are preserved, and only the original authentication URL is replaced.
-Chromium-family browsers select their normal profile and release channel rather
-than being forced into the stable channel's user-data directory.
-The extension rejects a different Wayland display and
-snapshots existing windows. It tracks the exact new Meta.Window whose title
-contains the marker, even after its title changes. The landing page polls for
-recognition and redirects in the same window, with an independent five-second
-fallback timer. Login does not require a popup or an extra click.
+## GNOME
 
-Only NetworkManager's ACTIVATED state on the captured active object permits a
-close request. A successful callback or a gpauth exit does not. On cancellation,
-failure, expiry (five minutes), missing/ambiguous windows, a different activation,
-or a NetworkManager restart, no window is closed. A second registration for the
-same active object invalidates the first: portal plus gateway SAML deliberately
-falls back to manual closing. Cancelling a registration also blocks further
-tracking for that activation, since the fallback may open an untracked window.
-A browser startup error before the landing page is served cancels registration
-and retries the original URL. A successful launcher handover is not treated as
-a failure. Disabling the extension removes all its timers,
-window signals and D-Bus registration. The helper pins the extension's bus owner,
-so a restart cannot silently register with a replacement instance.
+`Tracker` stores the exact Meta.Window reference and the exact active connection
+object. The extension snapshots the profile's `close-browser` value, watches new
+windows and title changes, and compares the browser's Wayland or X11 display to
+its Shell session. Success requires the same active object, UUID/path and a
+confirmed activated VPN. Expiration, cancellation, object loss, reused windows,
+duplicate markers or a second SAML registration invalidate automatic closing.
+A normal `Meta.Window.delete` request affects the whole window, never a process.
 
-The helper runs as the desktop user, never root. It serves no files and binds
-only an ephemeral IPv4 loopback port. Requests require an exact Host and random
-path, with no CORS permissions. Redirects are restricted to gpauth's loopback
-UUID URL; authentication URLs and callback data are not logged. Same-user
-processes are outside this correlation boundary. The extension does not accept
-shell commands or arbitrary window identities.
+The GNOME 45-51 entry point uses ES modules. Ubuntu 22.04 builds convert the staged
+entry point and shared tracker to GNOME 42-44's legacy loader with
+`scripts/build-legacy-extension.py`. No second tracking algorithm is maintained.
+The public schemas are compiled for both variants. The former global closing
+setting remains only as a deprecated schema key; it is ignored at runtime.
 
-Closing affects the **whole window**. Do not add unrelated tabs to the login
-window. GNOME cannot inspect tabs. Replaced windows are not followed.
-Unknown browsers routed through the wrapper receive their ordinary URL argument
-and can be tracked only if they create a new window exposing the landing-page marker. Reuse of an existing
-window or tab invalidates tracking, preserving manual closing. Read-only-home
-fallback profiles and sessions without a matching Wayland display also retain
-manual closing. Custom browser commands that the service passes directly to
-`gpclient` keep that behavior and bypass this optional integration.
-There is no resizing, process killing, incognito mode or separate Firefox
-profile. Firefox retains its normal controls; Chromium-family app mode
-uses a minimal layout. Existing cookies and manual callback approval remain.
+## KWin 5/6
 
-Automated launch tests cover Firefox, Chrome, Chromium, Edge and a custom browser,
-including bridge failure and literal profile arguments. These use fake browsers.
-Ubuntu 26.04 live tests confirmed Firefox and Chromium SSO and window closing;
-Arch GNOME 51.1 was tested with Firefox. Chrome, Edge and other allowed GNOME
-versions still need live tests. Other browsers' internal UI cannot be removed by GNOME.
+The desktop-user helper binds to the unique owner of `org.kde.KWin` and loads the
+packaged script with a random private filename/plugin name. It first waits for
+confirmation that the script has captured existing windows and installed its
+observers, then launches the marker page. The script supports KWin 5's client
+signals/list and KWin 6's window signals/list. It retains the exact target window
+reference and rejects existing windows, duplicate markers and lost targets.
 
-## Build and deployment
+KWin asynchronously polls the helper; replies are paced with a GLib timer. The
+helper checks the current NetworkManager owner, active object, UUID, path and VPN
+state before reporting connection success. Only an explicit true profile value
+permits `closeWindow()`. Before closing, the script rechecks all current windows
+for ambiguity. All signals are disconnected on completion, and the helper unloads
+its script and removes the private temporary script directory on exit.
 
-Use the [installation and testing guide](gnome-sso-window.md) for both platforms.
-On Arch, `./scripts/build-arch.sh` refreshes the patches and verifies the produced
-archive. On Ubuntu, the GNOME package includes the companion and compiled schema.
-Log out and back in after installation or extension updates.
+A per-activation claim under the user's private runtime directory prevents a
+second portal/gateway login or a fallback retry from re-enabling closing. The
+second registration cancels an existing helper if one is still running. Claims
+are pruned after the corresponding active connection disappears. The helper
+pins KWin calls to the original unique owner, so a restarted compositor cannot
+receive a stale script operation. The adapter does not alter persistent KWin
+settings or register global shortcuts.
 
-## Dry-run identification on supported GNOME Wayland sessions
+## Profile and fallback behavior
 
-Log out and back in after first installing the extension, then:
+GTK3, GTK4 and Plasma editors load/save `close-browser=true|false`, unchecked by
+default. The GTK forms are wider with vertical scrolling; Plasma advertises a
+larger initial/minimum size. The host connection editor still controls the outer
+window. The checkbox never changes browser profile data or MIME defaults.
 
-```bash
-gnome-extensions enable gpclient-sso@globalprotect-saml-networkmanager
-gsettings --schemadir /usr/share/gnome-shell/extensions/gpclient-sso@globalprotect-saml-networkmanager/schemas set org.gnome.shell.extensions.gpclient-sso close-windows false
-journalctl --user --follow --grep=gpclient-sso
-```
+Firefox opens a normal dedicated window with its usual controls; Chromium-family
+browsers use app mode. Custom commands that bypass the supplied wrapper retain
+manual closing. A read-only-home fallback also retains manual closing. Helper
+startup failure retries the original URL; errors after launch never start a
+duplicate browser. Failed or cancelled VPN authentication cannot trigger closure.
 
-`--follow` streams new journal entries; `--grep` filters the extension messages.
-Connect using the existing GNOME VPN toggle. Keep the chosen browser open with
-its usual profile. Complete the callback manually if requested. Expect a
-registration log,
-then `would close tracked login window` only after the VPN becomes active.
-The window must remain open in dry run. If no registration appears, check:
+## Verification
 
-```bash
-gnome-extensions info gpclient-sso@globalprotect-saml-networkmanager
-sudo journalctl -u nm-gpclient.service -b
-```
+Automated coverage includes profile defaults and true/false round trips in real
+GTK editors, helper identity/fallback, generated legacy artifacts, GNOME lifecycle,
+KWin 5/6 signals and window identification, cancelled/ambiguous sessions, and
+package content checks. Regression tests rejected the previous global setting's
+ability to override an unchecked profile before the fix. KWin tests also caught
+and fixed a mutable pre-launch snapshot and a non-boolean close value.
 
-`-b` selects the current boot. An unavailable extension, optional dependency or
-unverified session/activation deliberately falls back to normal authentication.
-Do not infer success from a missing log message. Check the normal working login
-flow and callback before changing the setting.
-
-Exercise pending manual callback, cancellation, tunnel failure, another active
-VPN, a retry, an unrelated new browser window, manual login-window closure and
-extension disable/re-enable. None should close an unrelated window. Portal and
-gateway SAML should leave both windows open. Ubuntu 26.04 live tests confirmed
-Firefox/Chromium login, closing and cancellation;
-the remaining scenarios still need explicit validation. Mock tests cannot
-establish live behavior.
-
-## Opt-in closing, after dry-run verification
-
-Only after the dry-run log identifies the expected window on successful VPN
-activation, opt in explicitly:
-
-```bash
-gsettings --schemadir /usr/share/gnome-shell/extensions/gpclient-sso@globalprotect-saml-networkmanager/schemas set org.gnome.shell.extensions.gpclient-sso close-windows true
-```
-
-The extension uses Meta.Window.delete with the current Shell timestamp and never
-force-kills a browser. An unresponsive browser may ignore the close request.
-
-## Rollback
-
-Disable only the optional integration at any time:
-
-```bash
-gnome-extensions disable gpclient-sso@globalprotect-saml-networkmanager
-```
-
-Normal VPN login and manual closing remain available. To restore all installed
-code, disconnect the VPN and reinstall a saved working package as described in
-the [rollback guide](gnome-sso-window.md#disable-or-roll-back).
-
-## Local verification
-
-The latest local review and its exact validation limits are recorded in
+Tests using fake buses/windows do not prove live desktop behavior. Earlier live
+tests covered GNOME Wayland on Arch 51.1 with Firefox and Ubuntu 26.04 with Firefox
+and Chromium. GNOME 42, KWin 5/6, X11 and the new checkbox still need live tests.
+Use [the setup guide](gnome-sso-window.md) for that checklist and
+[BUILD.md](BUILD.md) for automated checks. Results and remaining limits are in
 [FORK_REVIEW.md](FORK_REVIEW.md).
-
-```bash
-python3 -m pytest tests/unit -q
-gjs -m tests/unit/sso_tracker.mjs
-gjs -m tests/unit/sso_extension.mjs
-bash -n scripts/browser-wrapper.sh PKGBUILD
-make DESTDIR=/tmp/gpclient-sso-stage install-sso-extension
-```
-
-The Python suite needs loopback sockets and the repository's Debian packaging
-tools for its full packaging tests. Run wrapper tests as both root and non-root
-as described in AGENTS.md. GJS tests use fake connections and windows, never the
-real Shell. Installing into DESTDIR verifies schema compilation without installing
-into the live session. Full Rust/package rebuild and real SSO are separate
-checks; do not claim them from these commands alone.
-
-API references: [GNOME extension structure](https://gjs.guide/extensions/development/creating.html),
-[NetworkManager active connection](https://networkmanager.dev/docs/api/latest/gdbus-org.freedesktop.NetworkManager.Connection.Active.html),
-[normal window close](https://mutter.gnome.org/meta/method.Window.delete.html).

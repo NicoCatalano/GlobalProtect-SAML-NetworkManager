@@ -6,7 +6,9 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 BASE = "8758f6a5b933a6c9d5f104b88df03778ee83089f"
 TRACKED = ["Makefile", "debian/rules", "service/nm-gpclient-service.py", "scripts/browser-wrapper.sh"]
-NEW = ["scripts/sso-window-helper.py", "config/gpclient-callback.desktop"]
+TRACKED += ["plugins/gnome/nm-gpclient-editor.c", "plugins/gnome/nm-gpclient-editor-gtk3.c",
+            "plugins/plasma/gpclientwidget.cpp", "plugins/plasma/gpclientwidget.ui"]
+NEW = ["scripts/kwin-sso-helper.py", "scripts/kwin-sso.js", "scripts/build-legacy-extension.py", "scripts/sso-window-helper.py", "config/gpclient-callback.desktop"]
 NEW += [str(path.relative_to(ROOT)) for path in sorted((ROOT / "extensions/gpclient-sso@globalprotect-saml-networkmanager").rglob("*"))
         if path.is_file() and path.suffix in (".js", ".json", ".xml")]
 parts = [subprocess.check_output(["git", "diff", BASE, "--", *TRACKED], cwd=ROOT)]

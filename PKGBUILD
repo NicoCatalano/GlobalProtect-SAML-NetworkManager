@@ -1,6 +1,6 @@
 pkgname=networkmanager-gpclient-git
 pkgver=pr.32.r0.g8758f6a
-pkgrel=6
+pkgrel=7
 pkgdesc='GlobalProtect SAML/SSO VPN plugin for NetworkManager'
 arch=('x86_64')
 url='https://github.com/NicoCatalano/GlobalProtect-SAML-NetworkManager'
@@ -16,8 +16,8 @@ depends+=('gtk3')
 depends+=('gtk4')
 depends+=('libnma')
 depends+=('libnma-gtk4')
-optdepends=('gnome-shell: optional GNOME 45-51 Wayland SSO window tracking'
-            'python-gobject: optional SSO window bridge')
+optdepends=('gnome-shell: optional GNOME SSO window tracking'
+            'python-gobject: optional GNOME/KWin SSO window bridge')
 makedepends=('git')
 makedepends+=('rust')
 makedepends+=('clang')
@@ -66,6 +66,8 @@ package() {
   install -Dm644 plugins/gnome/nm-gpclient-service.name "$pkgdir/usr/lib/NetworkManager/VPN/nm-gpclient-service.name"
   install -Dm755 scripts/browser-wrapper.sh "$pkgdir/usr/libexec/gpclient/browser-wrapper"
   install -Dm755 scripts/sso-window-helper.py "$pkgdir/usr/libexec/gpclient/sso-window-helper"
+  install -Dm644 scripts/kwin-sso-helper.py "$pkgdir/usr/libexec/gpclient/kwin-sso-helper.py"
+  install -Dm644 scripts/kwin-sso.js "$pkgdir/usr/libexec/gpclient/kwin-sso.js"
   make DESTDIR="$pkgdir" install-sso-extension
   install -Dm644 config/gpclient-callback.desktop "$pkgdir/usr/share/applications/gpclient-callback.desktop"
   install -Dm755 scripts/edge-wrapper.sh "$pkgdir/usr/libexec/gpclient/edge-wrapper"

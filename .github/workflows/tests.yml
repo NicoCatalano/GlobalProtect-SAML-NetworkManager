@@ -94,9 +94,15 @@ jobs:
       - name: Install GJS
         run: |
           sudo apt-get update
-          sudo apt-get install --yes gjs libglib2.0-bin
+          sudo apt-get install --yes gjs libglib2.0-bin build-essential pkg-config libnm-dev libgtk-3-dev libgtk-4-dev xvfb xauth
       - name: Test window tracking and extension lifecycle without a desktop
         run: |
           gjs -m tests/unit/sso_tracker.mjs
           gjs -m tests/unit/sso_extension.mjs
+          gjs -m tests/unit/kwin_sso.mjs
+          gcc -Wall tests/test_editor_preferences.c -o "$RUNNER_TEMP/editor-gtk3-test" $(pkg-config --cflags --libs gtk+-3.0 libnm)
+          gcc -Wall -DTEST_GTK4 tests/test_editor_preferences.c -o "$RUNNER_TEMP/editor-gtk4-test" $(pkg-config --cflags --libs gtk4 libnm)
+          GDK_BACKEND=x11 xvfb-run -a "$RUNNER_TEMP/editor-gtk3-test"
+          GDK_BACKEND=x11 xvfb-run -a "$RUNNER_TEMP/editor-gtk4-test"
           make DESTDIR="$RUNNER_TEMP/sso-stage" install-sso-extension
+          make SSO_GNOME_LEGACY=1 DESTDIR="$RUNNER_TEMP/sso-legacy-stage" install-sso-extension

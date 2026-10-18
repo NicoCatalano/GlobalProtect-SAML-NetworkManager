@@ -7,6 +7,8 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 EXTENSION = "gpclient-sso@globalprotect-saml-networkmanager"
 FILES = {
+    "scripts/kwin-sso-helper.py": "usr/libexec/gpclient/kwin-sso-helper.py",
+    "scripts/kwin-sso.js": "usr/libexec/gpclient/kwin-sso.js",
     "service/nm-gpclient-service.py": "usr/lib/NetworkManager/nm-gpclient-service",
     "scripts/nm-gpclient-systemd-activate": "usr/lib/NetworkManager/nm-gpclient-systemd-activate",
     "plugins/gnome/nm-gpclient-service.name": "usr/lib/NetworkManager/VPN/nm-gpclient-service.name",
@@ -30,6 +32,9 @@ def verify(package, expected_version):
     for source, installed in FILES.items():
         if read(installed) != (ROOT / source).read_bytes():
             raise ValueError(f"Package contains stale or different code: {installed}")
+    for name in ("libnm-vpn-plugin-gpclient-editor.so", "libnm-gtk4-vpn-plugin-gpclient-editor.so"):
+        if b"Close login window after VPN connects" not in read("usr/lib/NetworkManager/" + name):
+            raise ValueError(f"Package contains an editor without the closing control: {name}")
     if not read(f"usr/share/gnome-shell/extensions/{EXTENSION}/schemas/gschemas.compiled"):
         raise ValueError("Compiled extension schema is missing")
 

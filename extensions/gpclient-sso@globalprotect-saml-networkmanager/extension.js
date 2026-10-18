@@ -20,7 +20,6 @@ const XML = `<node><interface name="${BUS_NAME}">
 export default class SsoWindowExtension extends Extension {
     enable() {
         this._tracker = new Tracker();
-        this._settings = this.getSettings();
         this._watched = new Map();
         this._cancellable = new Gio.Cancellable();
         const cancellable = this._cancellable;
@@ -59,7 +58,7 @@ export default class SsoWindowExtension extends Extension {
     Register(uuid, path, attempt, marker, session, nmOwner) {
         // A per-user bus may be shared by more than one graphical session.
         // Decline tracking if we cannot prove the browser targets this Shell.
-        const shellSession = GLib.getenv('WAYLAND_DISPLAY');
+        const shellSession = GLib.getenv('WAYLAND_DISPLAY') || GLib.getenv('DISPLAY');
         if (!shellSession || session !== shellSession ||
             !this._client || this._client.get_dbus_name_owner() !== nmOwner)
             return false;
@@ -67,6 +66,10 @@ export default class SsoWindowExtension extends Extension {
         const windows = this._windows();
         const accepted = this._tracker.register(uuid, path, attempt, marker, active, windows, this._now());
         if (accepted) {
+            // Snapshot the profile choice for this activation. An unreadable
+            // profile must not inherit a global opt-in and close a window.
+            const policy = active.get_connection()?.get_setting_vpn()?.get_data_item('close-browser');
+            this._tracker.attempts.get(marker).closeWindows = policy === 'true';
             // Watch existing windows too: reuse must invalidate identification.
             for (const window of windows)
                 this._watch(window);
@@ -109,8 +112,8 @@ export default class SsoWindowExtension extends Extension {
 
     _update() {
         const active = this._client?.nm_running ? this._client.get_active_connections() : [];
-        this._tracker.update(active, this._windows(), this._now(), window => {
-            if (this._settings.get_boolean('close-windows')) {
+        this._tracker.update(active, this._windows(), this._now(), (window, entry) => {
+            if (entry.closeWindows) {
                 if (window.can_close())
                     window.delete(global.get_current_time());
             } else {
@@ -133,7 +136,6 @@ export default class SsoWindowExtension extends Extension {
         Gio.bus_unown_name(this._owner);
         this._tracker = null;
         this._client = null;
-        this._settings = null;
         this._export = null;
         this._cancellable = null;
     }

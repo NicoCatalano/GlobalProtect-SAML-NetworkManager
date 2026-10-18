@@ -12,7 +12,10 @@ function check(value, message) {
     assertions++;
     if (!value) throw new Error(message);
 }
-for (const close of [false, true]) {
+for (const sessionType of ['wayland', 'x11']) {
+const session = sessionType === 'wayland' ? 'wayland-test' : ':9';
+for (const close of [true, false]) {
+for (const policy of ['false', null, 'true', 'invalid', 'unavailable']) {
     const cleaned = [];
     const messages = [];
     let created;
@@ -22,6 +25,9 @@ for (const close of [false, true]) {
         get_uuid: () => '12345678-1234-4234-8234-123456789abc',
         get_path: () => '/org/freedesktop/NetworkManager/ActiveConnection/42',
         get_vpn: () => true,
+        get_connection: () => policy === 'unavailable' ? null : {
+            get_setting_vpn: () => ({get_data_item: () => policy}),
+        },
         get_state() { return this.state; },
     };
     const client = {nm_running: true, get_active_connections: () => [active],
@@ -41,7 +47,7 @@ for (const close of [false, true]) {
         bus_unown_name(id) { check(id === 42, 'bus id'); cleaned.push('bus'); },
     };
     const fakeGLib = {
-        getenv: () => 'wayland-test',
+        getenv: name => name === 'WAYLAND_DISPLAY' ? (sessionType === 'wayland' ? session : null) : session,
         get_monotonic_time: () => 0,
         timeout_add_seconds: () => 12,
         Source: {remove(id) { check(id === 12, 'timer id'); cleaned.push('timer'); }},
@@ -62,8 +68,8 @@ for (const close of [false, true]) {
     extension.enable();
     const args = [active.get_uuid(), active.get_path(), 'b'.repeat(32), 'a'.repeat(48)];
     check(!extension.Register(...args, 'other-session', ':1.42'), 'reject other session');
-    check(!extension.Register(...args, 'wayland-test', ':1.99'), 'reject restarted daemon');
-    check(extension.Register(...args, 'wayland-test', ':1.42'), 'register');
+    check(!extension.Register(...args, session, ':1.99'), 'reject restarted daemon');
+    check(extension.Register(...args, session, ':1.42'), 'register');
     const signals = new Map();
     let next = 0;
     let deleted = false;
@@ -81,11 +87,14 @@ for (const close of [false, true]) {
     check(!deleted, 'pending login stays open');
     active.state = 2;
     extension._update();
-    check(deleted === close, 'setting controls normal close');
-    check(messages.includes('gpclient-sso: would close tracked login window') === !close, 'dry run log');
+    const expected = policy === 'true';
+    check(deleted === expected, `profile policy ${policy} overrides global preference ${close}`);
+    check(messages.includes('gpclient-sso: would close tracked login window') === !expected, 'dry run log');
     check(signals.size === 0, 'completed window signals disconnected');
     extension.disable();
     check(cleaned.length === 4 && new Set(cleaned).size === 4, 'disable resources cleaned');
     check(extension._client === null && extension._tracker === null, 'state released');
+}
+}
 }
 print(`${assertions} extension lifecycle assertions passed`);

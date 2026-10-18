@@ -53,6 +53,8 @@ install: all
 	# Install scripts
 	install -D -m 755 scripts/nm-gpclient-systemd-activate /usr/lib/NetworkManager/nm-gpclient-systemd-activate
 	install -D -m 755 scripts/sso-window-helper.py /usr/libexec/gpclient/sso-window-helper
+	install -D -m 644 scripts/kwin-sso-helper.py /usr/libexec/gpclient/kwin-sso-helper.py
+	install -D -m 644 scripts/kwin-sso.js /usr/libexec/gpclient/kwin-sso.js
 	install -D -m 755 scripts/browser-wrapper.sh /usr/libexec/gpclient/browser-wrapper
 	install -D -m 755 scripts/edge-wrapper.sh /usr/libexec/gpclient/edge-wrapper
 	# Install auth dialog (interactive credentials/RSA token prompts)
@@ -128,6 +130,8 @@ install-dev: gnome-plugins
 	# Install helper scripts
 	sudo install -m 755 scripts/nm-gpclient-systemd-activate $(NM_LIB_DIR)/nm-gpclient-systemd-activate
 	sudo install -m 755 scripts/sso-window-helper.py $(NM_LIBEXEC_DIR)/sso-window-helper
+	sudo install -m 644 scripts/kwin-sso-helper.py $(NM_LIBEXEC_DIR)/kwin-sso-helper.py
+	sudo install -m 644 scripts/kwin-sso.js $(NM_LIBEXEC_DIR)/kwin-sso.js
 	sudo install -m 755 scripts/browser-wrapper.sh $(NM_LIBEXEC_DIR)/browser-wrapper
 	sudo install -m 755 scripts/edge-wrapper.sh $(NM_LIBEXEC_DIR)/edge-wrapper
 
@@ -233,9 +237,13 @@ clean-artifacts:
 
 # Optional companion; installation does not enable it or change its settings.
 SSO_EXTENSION = gpclient-sso@globalprotect-saml-networkmanager
+# Ubuntu 22.04 packages the legacy GNOME 42 adapter. Override for other builds.
+SSO_GNOME_LEGACY ?= $(shell . /etc/os-release; [ "$$ID:$$VERSION_ID" = "ubuntu:22.04" ] && echo 1 || echo 0)
 .PHONY: install-sso-extension
 install-sso-extension:
 	install -d "$(DESTDIR)/usr/share/gnome-shell/extensions/$(SSO_EXTENSION)/schemas"
 	install -m 644 extensions/$(SSO_EXTENSION)/*.js extensions/$(SSO_EXTENSION)/metadata.json "$(DESTDIR)/usr/share/gnome-shell/extensions/$(SSO_EXTENSION)/"
 	install -m 644 extensions/$(SSO_EXTENSION)/schemas/*.xml "$(DESTDIR)/usr/share/gnome-shell/extensions/$(SSO_EXTENSION)/schemas/"
 	glib-compile-schemas "$(DESTDIR)/usr/share/gnome-shell/extensions/$(SSO_EXTENSION)/schemas"
+
+	@if [ "$(SSO_GNOME_LEGACY)" = 1 ]; then python3 scripts/build-legacy-extension.py "$(DESTDIR)/usr/share/gnome-shell/extensions/$(SSO_EXTENSION)"; fi

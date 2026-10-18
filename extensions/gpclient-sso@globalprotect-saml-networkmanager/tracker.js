@@ -92,7 +92,7 @@ export class Tracker {
             this.attempts.delete(marker);
             this.blockedPaths.add(entry.path);
             if (entry.window && !entry.ambiguous && windows.includes(entry.window))
-                completed(entry.window);
+                completed(entry.window, entry);
         }
     }
 }

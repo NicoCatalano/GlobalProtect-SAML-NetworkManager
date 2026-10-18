@@ -1,6 +1,7 @@
 # Local fork preparation review
 
-Reviewed on 2026-10-17, before preparing commits or creating a fork.
+Original review: 2026-10-17. Earlier sections record the scope at that time.
+The current expanded scope is in [desktop adapters and profile settings](#desktop-adapters-and-profile-settings-2026-10-18).
 
 ## Scope
 
@@ -145,3 +146,77 @@ The installed package, running VPN and desktop extension were not changed.
    inaccurate README prerequisite. No runtime changes were needed.
 
 The final pass and current-head test results are recorded in PR #1.
+
+## Desktop adapters and profile settings, 2026-10-18
+
+The user expanded the scope to automatic closing on Ubuntu 22.04 and KDE Plasma,
+a per-VPN checkbox, and a larger configuration form. This supersedes the earlier
+legacy/X11 exclusions above.
+
+### Implementation
+
+- GTK3, GTK4 and Plasma editors store explicit `close-browser=true|false` in the
+  VPN profile. Missing, malformed or unreadable values cannot enable closing.
+  The prior global `close-windows` preference is deprecated and ignored; users
+  should select the new checkbox after upgrading if they want automatic closing.
+- GTK forms use a wider scrollable viewport so fields stay reachable on small
+  screens. Plasma has larger initial/minimum dimensions. A new README screenshot
+  was rendered from the actual GTK4 editor with a fictional profile.
+- GNOME 42-44 artifacts are generated from the shared modern entry point/tracker
+  when building on Ubuntu 22.04. Modern builds retain 45-51 metadata. GNOME matches
+  either the Wayland display or the X11 display to its own session.
+- The KDE adapter loads a per-activation KWin 5/6 script under the desktop user's
+  identity, waits for the pre-launch window snapshot, preserves the exact window
+  reference, validates NM owner/object/UUID/state, and unloads the script on exit.
+  It never changes persistent KWin settings or kills a browser process.
+- Repeated SAML claims invalidate closing. Review caught a startup race before
+  the first helper exported its bus object: a second claim now also writes a
+  private persistent cancellation marker, so invalidation survives that race or
+  a helper timeout. Claims are pruned after the active connection disappears.
+  A subsequent review also bound acknowledgements/polls to the original KWin
+  sender; only cancellation may come from another helper.
+- Both Ubuntu desktop paths receive the bridge through the core package with
+  Python GI/NM introspection dependencies. The Arch recipe includes the adapter
+  and GTK editors; native Plasma editor packages remain in the Ubuntu matrix.
+  Arch package release 7 contains the refreshed exported source patch.
+
+The implementation was checked against the tagged upstream APIs:
+[GNOME Mutter 42 display API](https://github.com/GNOME/mutter/blob/42.0/src/meta/display.h),
+[KWin 5.24 scripting](https://github.com/KDE/kwin/blob/v5.24.0/src/scripting/scripting.cpp),
+[KWin 5.24 workspace](https://github.com/KDE/kwin/blob/v5.24.0/src/scripting/workspace_wrapper.h),
+[KWin 6.0 scripting](https://github.com/KDE/kwin/blob/v6.0.0/src/scripting/scripting.cpp),
+[KWin 6.0 workspace](https://github.com/KDE/kwin/blob/v6.0.0/src/scripting/workspace_wrapper.h).
+
+### Verification and limits
+
+- Full non-root suite: **2611 passed, 47 skipped**.
+- Full root namespace suite: **2641 passed, 16 skipped, 1 failed**, the same
+  previously reproduced desktop runtime-directory assertion described above.
+- After the final compositor-sender guard, all **35 changed KWin/legacy/package tests**
+  passed again in both root and non-root namespaces. The new negative test
+  rejected an acknowledgement from a different compositor before the guard.
+- GJS: **54 tracker**, **284 GNOME lifecycle/profile/session**, and **216 KWin
+  adapter** assertions passed. Negative tests rejected the old global opt-in's
+  ability to override an unchecked profile before the fix. KWin tests caught
+  mutable snapshots, non-boolean close flags and the cancellation race before
+  their fixes.
+- Real GTK3 and GTK4 widgets passed missing/invalid defaults, true/false load/save
+  round trips and scroll-layout checks on temporary Broadway displays. Both
+  plugins compiled, and Qt's UI compiler accepted the Plasma form. CI now runs
+  the GTK preference checks under Xvfb and stages both GNOME variants.
+- Arch release 7 rebuilt successfully after the final adapter fix and passed
+  package identity/content verification, including the new control in both GTK
+  editor binaries. A stale-editor regression failed before the checker was
+  strengthened. Generated artifacts are not committed.
+- Source whitespace and documentation links are checked separately from generated
+  git-patch context.
+
+This machine has no local CMake/KF development environment for compiling Plasma;
+the Ubuntu 5/6 package matrix must pass on the new head. New code has not been
+installed over the user's working VPN. Live GNOME 42, Plasma 5/6, X11 and new
+checkbox tests remain required. Previous successful live tests cover the earlier
+GNOME Wayland implementation only. Package builds and fake windows do not prove
+live compatibility with each identity provider or browser.
+
+Current-head review passes and CI status are recorded in PR #1. The fork APT
+repository remains unpublished; no merge, tag or release is part of this work.
