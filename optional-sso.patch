@@ -1,7 +1,16 @@
 diff --git a/Makefile b/Makefile
-index 0e608a8..eaf3049 100644
+index 0e608a8..80fbbf5 100644
 --- a/Makefile
 +++ b/Makefile
+@@ -6,7 +6,7 @@ GPOC_DIR = external/GlobalProtect-openconnect
+ RUSTUP_HOME ?= $(HOME)/.rustup
+ CARGO_HOME ?= $(HOME)/.cargo
+ CARGO = $(CARGO_HOME)/bin/cargo
+-RUST_VERSION = 1.85
++RUST_VERSION = 1.89
+ 
+ # Main targets
+ all: gnome-plugins gpclient gpauth
 @@ -51,6 +51,8 @@ install: all
  	# Install Python service
  	install -D -m 755 service/nm-gpclient-service.py /usr/lib/NetworkManager/nm-gpclient-service
@@ -42,10 +51,20 @@ index 0e608a8..eaf3049 100644
 +	install -m 644 extensions/$(SSO_EXTENSION)/schemas/*.xml "$(DESTDIR)/usr/share/gnome-shell/extensions/$(SSO_EXTENSION)/schemas/"
 +	glib-compile-schemas "$(DESTDIR)/usr/share/gnome-shell/extensions/$(SSO_EXTENSION)/schemas"
 diff --git a/debian/rules b/debian/rules
-index 8763e74..31d9d0f 100755
+index 8763e74..3cd52f0 100755
 --- a/debian/rules
 +++ b/debian/rules
-@@ -113,6 +113,10 @@ ifneq ($(HAS_CORE),)
+@@ -89,6 +89,9 @@ ifneq ($(HAS_CORE),)
+ 	# Install auth dialog (interactive credentials/RSA token prompts, GTK)
+ 	install -D -m 755 auth-dialog/nm-gpclient-auth-dialog.py \
+ 		$(CURDIR)/debian/network-manager-gpclient-gnome/usr/libexec/nm-gpclient-auth-dialog
++
++	# Ship the optional GNOME Wayland SSO window extension with the GNOME package.
++	$(MAKE) DESTDIR=$(CURDIR)/debian/network-manager-gpclient-gnome install-sso-extension
+ endif
+ 
+ 	# Install Plasma plugin (into network-manager-gpclient-plasma, or into
+@@ -113,6 +116,10 @@ ifneq ($(HAS_CORE),)
  		$(CURDIR)/debian/network-manager-gpclient/usr/lib/NetworkManager/VPN/nm-gpclient-service.name
  	install -D -m 755 service/nm-gpclient-service.py \
  		$(CURDIR)/debian/network-manager-gpclient/usr/lib/NetworkManager/nm-gpclient-service

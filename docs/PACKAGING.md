@@ -123,7 +123,8 @@ dpkg-buildpackage -us -uc -b
 
 ## Installation
 
-Download packages from [GitHub Releases](https://github.com/NicoCatalano/GlobalProtect-SAML-NetworkManager/releases) for your Ubuntu version.
+Until a stable fork release is published, use source builds or PR test packages
+from [GitHub Releases](https://github.com/NicoCatalano/GlobalProtect-SAML-NetworkManager/releases) for your Ubuntu version.
 
 Install two packages:
 1. **network-manager-gpclient** - core package (required)
@@ -132,8 +133,7 @@ Install two packages:
    **network-manager-gpclient-plasma-6** - for KDE neon (Ubuntu 24.04 with Plasma 6)
 
 ```bash
-sudo dpkg -i <downloaded-packages>.deb
-sudo apt-get install -f  # install dependencies
+sudo apt install ./network-manager-gpclient_*.deb ./network-manager-gpclient-gnome_*.deb  # install dependencies
 ```
 
 ## Supported Platforms

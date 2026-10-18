@@ -64,18 +64,18 @@ uses a minimal layout. Existing cookies and manual callback approval remain.
 
 Automated launch tests cover Firefox, Chrome, Chromium, Edge and a custom browser,
 including bridge failure and literal profile arguments. These use fake browsers.
-Real app-mode navigation, existing-profile reuse and SSO still need to be exercised
-on each browser. Other browsers' internal UI cannot be removed by GNOME.
+Ubuntu 26.04 live tests confirmed Firefox and Chromium SSO and window closing;
+Arch GNOME 51.1 was tested with Firefox. Chrome, Edge and other allowed GNOME
+versions still need live tests. Other browsers' internal UI cannot be removed by GNOME.
 
 ## Build and deployment
 
-Use the single [Arch build and deployment guide](gnome-sso-window.md).
-The build command is `./scripts/build-arch.sh`; it refreshes the patches and
-verifies the produced archive. Older packages are kept in
-`build/arch/previous-packages/`. For first discovery or extension code updates,
-log out and back in after installation.
+Use the [installation and testing guide](gnome-sso-window.md) for both platforms.
+On Arch, `./scripts/build-arch.sh` refreshes the patches and verifies the produced
+archive. On Ubuntu, the GNOME package includes the companion and compiled schema.
+Log out and back in after installation or extension updates.
 
-## Dry-run identification on GNOME 51.1
+## Dry-run identification on supported GNOME Wayland sessions
 
 Log out and back in after first installing the extension, then:
 
@@ -105,8 +105,10 @@ flow and callback before changing the setting.
 Exercise pending manual callback, cancellation, tunnel failure, another active
 VPN, a retry, an unrelated new browser window, manual login-window closure and
 extension disable/re-enable. None should close an unrelated window. Portal and
-gateway SAML should leave both windows open. These live GNOME/SSO tests are still
-required; mock tests cannot establish their results.
+gateway SAML should leave both windows open. Ubuntu 26.04 live tests confirmed
+Firefox/Chromium login, closing and cancellation;
+the remaining scenarios still need explicit validation. Mock tests cannot
+establish live behavior.
 
 ## Opt-in closing, after dry-run verification
 
@@ -129,15 +131,8 @@ gnome-extensions disable gpclient-sso@globalprotect-saml-networkmanager
 ```
 
 Normal VPN login and manual closing remain available. To restore all installed
-code, disconnect the VPN, reinstall the saved working archive and stop the
-backend before the next connection:
-
-```bash
-sudo pacman -U build/arch/previous-packages/networkmanager-gpclient-git-pr.32.r0.g8758f6a-2-x86_64.pkg.tar.zst
-sudo systemctl stop nm-gpclient.service
-```
-
-No profile edits, MIME resets or deletion of browser data are needed.
+code, disconnect the VPN and reinstall a saved working package as described in
+the [rollback guide](gnome-sso-window.md#disable-or-roll-back).
 
 ## Local verification
 

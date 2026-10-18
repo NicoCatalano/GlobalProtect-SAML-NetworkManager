@@ -1,12 +1,12 @@
-# APT repository (GitHub Pages)
+# APT repository publishing (GitHub Pages)
 
-Packages are published as a signed apt repository at
-<https://nicocatalano.github.io/GlobalProtect-SAML-NetworkManager/>, so installing and
-updating works like with any PPA - and `apt` resolves the dependency between the
-core service and the GUI packages, which downloading individual `.deb` files
-never could ([#5](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/issues/5)).
+**Fork status, 2026-10-18:** GitHub Pages is configured, but the public signing-key
+URL returns HTTP 404. The signed APT repository is not published yet. Use source
+builds or PR test packages from this fork's [releases](https://github.com/NicoCatalano/GlobalProtect-SAML-NetworkManager/releases).
+Do not add the repository below until a signed release and its indexes have been
+published and verified. These are the intended installation and maintenance steps.
 
-## For users
+## Installation after publication
 
 ```bash
 curl -fsSL https://nicocatalano.github.io/GlobalProtect-SAML-NetworkManager/gpclient-archive-keyring.gpg \
@@ -41,7 +41,7 @@ Use the value of `dpkg --print-architecture` (`arm64` on ARM); without the line 
 also asks for foreign-architecture indexes such as `i386`, which the repository
 does not publish.
 
-Supported suites are Ubuntu release codenames: `jammy` (22.04), `noble` (24.04),
+The publishing configuration targets Ubuntu release codenames: `jammy` (22.04), `noble` (24.04),
 `resolute` (26.04). Both `amd64` and `arm64` are built; apt picks the one matching
 your system.
 
@@ -55,6 +55,11 @@ sudo apt update
 ```
 
 ## For the maintainer
+
+Creating the fork does not publish packages or copy upstream signing secrets.
+Configure a dedicated signing key, publish a tagged release, and verify the key,
+`InRelease` files and package indexes before advertising APT installation.
+This PR does not create a release or deploy an APT repository.
 
 ### Cutting a release
 
@@ -164,7 +169,7 @@ gh api -X POST repos/NicoCatalano/GlobalProtect-SAML-NetworkManager/pages -f bui
 A public repository means a public site - which is what an apt repository is
 anyway.
 
-### Not implemented
+### PR test packages
 
 There is no testing channel for prereleases in the apt repository. Test builds of
 pull requests are published as the prerelease `pr-<N>` (removed when the PR

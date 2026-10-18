@@ -1,81 +1,113 @@
-# Arch build and deployment
+# SSO window installation and testing
 
-Run commands from the project root. Use `scripts/build-arch.sh` for local builds;
-it exports the current source patch, builds the package, and checks the
-archive against the service, wrapper, helper and extension in this checkout.
-It produces one installable package, with no separate debug package.
+The optional companion tracks one dedicated browser login window and requests
+its closure only after the matching VPN connects. It never kills the browser.
+Closing is disabled by default.
 
-## Compatibility
+## Compatibility and validation
 
-The companion allows GNOME Shell 45-51 on Wayland. GNOME 51.1 with Firefox is
-confirmed on Arch Linux; versions 45-50 still require live testing.
-The existing runtime checks decline automatic closing outside a matching
-Wayland session; metadata alone cannot restrict the display-server type.
+GNOME Shell metadata allows **45-51**; tracking requires **Wayland**. Live testing
+covers Arch GNOME 51.1 with Firefox and Ubuntu 26.04 GNOME Wayland with Firefox
+and Chromium. Ubuntu tests included cancellation without closing existing windows.
+Other allowed GNOME versions and real Chrome/Edge sessions need live validation.
 
-For standard Ubuntu LTS desktops, the earliest candidate is 24.04 (GNOME 46).
-26.04 (GNOME 50) is also within the allowed range. Ubuntu 22.04 ships GNOME 42,
-so its VPN plugin can still be used, but this companion requires a separate
-legacy port before it can close windows there. Companion Debian packaging and live Ubuntu
-browser/SSO verification are still pending.
+Ubuntu 24.04 is the earliest standard Ubuntu LTS desktop in the companion's
+allowed range. Ubuntu 22.04's GNOME 42 cannot run it; the core VPN remains usable.
+Legacy GNOME and X11 companion support are outside this fork's scope.
 
-## Build
+## Arch build and install
 
-Use a full Git checkout. The local Arch recipe applies the exported working-tree
-changes to the pinned upstream base `8758f6a5b933a6c9d5f104b88df03778ee83089f`.
-That ancestor must be available to the exporter; source ZIPs and shallow clones
-may not contain it. The patch helper indexes verified changes only in makepkg's
-disposable source checkout, so refreshes can replace previously added files.
-It does not stage changes in the development checkout.
+Run from a full recursive Git checkout:
 
 ```bash
 ./scripts/build-arch.sh
 ```
 
-Build workspaces and new packages are under `build/arch/`. Previously built
-packages, including the working release 2, are preserved under
-`build/arch/previous-packages/`. The bare Git cache at the project root and the
-separate `python-sdbus/` AUR checkout are preserved.
+The local recipe applies exported changes to upstream commit `8758f6a5`.
+That ancestor must be present, so avoid shallow clones. The build refreshes
+`optional-sso.patch` and verifies package contents against current source.
+Build outputs are under `build/arch/`; the recipe currently targets `x86_64`.
 
-## Deploy
-
-Disconnect the VPN first, then:
+Disconnect the VPN, then install the verified archive:
 
 ```bash
 sudo systemctl stop nm-gpclient.service
 sudo pacman -U "$(cat build/arch/package-path)"
 ```
 
-Log out of GNOME and log back in. This lets GNOME discover the newly installed
-extension and load the installed version.
+The manifest is written only after successful verification and removed before
+a new build. A failed build cannot advertise an older package as current.
+The build does not install anything or modify the running session.
+If rebuilding changes `optional-sso.patch`, commit the refreshed patch with the
+source changes. Keep generated package archives out of Git.
 
-Then enable the extension and opt into closing:
+## Ubuntu build and install
+
+Follow [BUILD.md](BUILD.md) to build and install the matching core and GNOME
+packages. `network-manager-gpclient-gnome` includes the companion and compiled
+schema. A separate `sudo make install-sso-extension` is not needed.
+
+## Enable and test
+
+After installation or extension updates, **log out and back in** so GNOME loads
+the installed code. Confirm the desktop session:
 
 ```bash
+gnome-shell --version
+echo "$XDG_SESSION_TYPE"
 gnome-extensions enable gpclient-sso@globalprotect-saml-networkmanager
+gsettings --schemadir /usr/share/gnome-shell/extensions/gpclient-sso@globalprotect-saml-networkmanager/schemas set org.gnome.shell.extensions.gpclient-sso close-windows false
+journalctl --user --follow --grep=gpclient-sso
+```
+
+Use the connection editor to select Firefox, then Chromium, or set the friendly
+name with `nmcli` (replace `My VPN` with your connection's name):
+
+```bash
+nmcli connection modify "My VPN" +vpn.data "browser=firefox"
+```
+
+Connect from GNOME while your usual browser session is already open. Complete
+authentication. Expect `would close tracked login window` only after the VPN
+connects; in this dry run the login window must stay open. Disconnect and repeat:
+
+```bash
+nmcli connection modify "My VPN" +vpn.data "browser=chromium"
+```
+
+After successful dry runs, enable closing and repeat both browser tests:
+
+```bash
 gsettings --schemadir /usr/share/gnome-shell/extensions/gpclient-sso@globalprotect-saml-networkmanager/schemas set org.gnome.shell.extensions.gpclient-sso close-windows true
 ```
 
-Connect using the usual GNOME VPN toggle. Closing is requested only after the
-matching VPN activates and only for the identified new window. Keep unrelated
-tabs out of that window. If no unique window can be identified, close it manually.
+The identified login window should close after connection; other windows must
+remain open. Keep unrelated tabs out of the login window. Cancel a login and
+check that no existing browser window closes. Also exercise a failed connection,
+a retry, manually closing the login window and disabling/re-enabling the extension.
+Ambiguous/reused windows and separate portal/gateway logins must be left for
+manual closing. A lack of logs does not establish successful tracking.
 
-The build script records the verified archive in `build/arch/package-path` only
-after a successful build and comparison with the current source. A failed build
-removes that record, so the install command cannot select a previous build.
-Closing defaults to dry run; the explicit setting above enables closing.
-The build script never installs a package or changes the running session.
+If tracking fails, inspect:
+
+```bash
+gnome-extensions info gpclient-sso@globalprotect-saml-networkmanager
+sudo journalctl -u nm-gpclient.service -b
+journalctl --user -b --grep=gpclient-sso
+```
 
 ## Disable or roll back
+
+Disable the optional companion:
 
 ```bash
 gnome-extensions disable gpclient-sso@globalprotect-saml-networkmanager
 ```
 
-To restore the previous working package, disconnect the VPN first:
+Ordinary VPN login and manual window closing remain available. To restore a
+previous package, disconnect the VPN and install your saved working archive
+using `pacman -U` on Arch or matching core/desktop `.deb` files with `apt install`
+on Ubuntu. Then stop `nm-gpclient.service` before the next connection, and log
+out and back in if the extension code changed.
 
-```bash
-sudo pacman -U build/arch/previous-packages/networkmanager-gpclient-git-pr.32.r0.g8758f6a-2-x86_64.pkg.tar.zst
-sudo systemctl stop nm-gpclient.service
-```
-
-[Implementation, dry-run testing and limitations](gnome-sso-development.md).
+[Technical design](gnome-sso-development.md) · [Review and test results](FORK_REVIEW.md)
